@@ -21,6 +21,23 @@ export function exceedsDeleteGuard(plannedDeletions: number, trackedItems: numbe
 }
 
 /**
+ * Delete Guard for one run: when the planned deletions exceed the threshold, they are replaced in
+ * the plan by `held(entry, deletion)` (reported as skipped) and returned as one batch to be queued
+ * for the admin's approval. Below the threshold the plan is returned untouched.
+ */
+export function holdBackDeletions<D extends GuardedDeletion, E extends { readonly deletion?: D }>(
+  entries: E[],
+  trackedItems: number,
+  held: (entry: E, deletion: D) => E,
+): { entries: E[]; batch: D[] } {
+  const batch = entries.flatMap((entry) => (entry.deletion ? [entry.deletion] : []));
+  if (!exceedsDeleteGuard(batch.length, trackedItems)) {
+    return { entries, batch: [] };
+  }
+  return { entries: entries.map((entry) => (entry.deletion ? held(entry, entry.deletion) : entry)), batch };
+}
+
+/**
  * Persists a halted deletion batch. Re-planning the very same batch (e.g. a repeated run before
  * the admin decided) returns the pending record instead of queueing a second one.
  */

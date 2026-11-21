@@ -17,7 +17,7 @@ import {
   type GoogleWriteOptions,
 } from '../providers/calendar-types.js';
 import { GoogleAuthError, type SyncProviders } from '../providers/types.js';
-import { exceedsDeleteGuard, queueDeletions, type GuardedDeletion } from './delete-guard.js';
+import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
 import { googleFingerprint, googleStartKey } from './google-events.js';
 import { googleEventToIcs, patchIcsWithGoogle } from './google-ics.js';
 import { translateIcs, type TranslatedCalendarObject } from './ics.js';
@@ -626,39 +626,23 @@ export async function executeCalendarDeletion(
   deleteSyncedEvent(db, item.syncedEventId);
 }
 
-/**
- * Delete Guard: when the planned deletions exceed the threshold, they are taken out of the plan
- * (reported as skipped) and returned as one batch to be queued for the admin's approval.
- */
-function holdBackDeletions(
-  entries: PlanEntry[],
-  trackedItems: number,
-): { entries: PlanEntry[]; batch: CalendarDeletion[] } {
-  const batch = entries.flatMap((entry) => (entry.deletion ? [entry.deletion] : []));
-  if (!exceedsDeleteGuard(batch.length, trackedItems)) {
-    return { entries, batch: [] };
-  }
-  const held = entries.map((entry): PlanEntry =>
-    entry.deletion
-      ? {
-          report: {
-            action: 'skip',
-            ruleId: entry.report.ruleId,
-            uid: entry.deletion.uid,
-            summary: entry.deletion.summary,
-            reason: 'delete_guard',
-          },
-        }
-      : entry,
-  );
-  return { entries: held, batch };
-}
-
 async function runRule(context: RuleContext): Promise<RuleRunResult> {
   const { options, rule, apple } = context;
   const plan = await new RulePlanner(context).plan();
   const { googleSyncToken } = plan;
-  const guarded = holdBackDeletions(plan.entries, listSyncedEvents(options.db, rule.id).length);
+  const guarded = holdBackDeletions(
+    plan.entries,
+    listSyncedEvents(options.db, rule.id).length,
+    (entry, deletion): PlanEntry => ({
+      report: {
+        action: 'skip',
+        ruleId: entry.report.ruleId,
+        uid: deletion.uid,
+        summary: deletion.summary,
+        reason: 'delete_guard',
+      },
+    }),
+  );
   const entries = guarded.entries;
 
   if (options.dryRun) {

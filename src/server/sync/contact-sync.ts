@@ -29,7 +29,7 @@ import {
   updateSyncedContact,
   type SyncedContactRow,
 } from './contact-store.js';
-import { exceedsDeleteGuard, queueDeletions, type GuardedDeletion } from './delete-guard.js';
+import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
 import { addGroupMember, buildVCard, mergeIntoVCard, parseVCard } from './vcard.js';
 
 export interface ContactSyncOptions {
@@ -482,23 +482,6 @@ async function readGoogle(
   };
 }
 
-/**
- * Delete Guard: when the planned deletions exceed the threshold, they are taken out of the plan
- * (reported as skipped) and returned as one batch to be queued for the admin's approval.
- */
-function holdBackDeletions(entries: PlanEntry[], trackedCount: number): { entries: PlanEntry[]; batch: ContactDeletion[] } {
-  const batch = entries.flatMap((entry) => (entry.deletion ? [entry.deletion] : []));
-  if (!exceedsDeleteGuard(batch.length, trackedCount)) {
-    return { entries, batch: [] };
-  }
-  const held = entries.map((entry): PlanEntry =>
-    entry.deletion
-      ? { report: { action: 'skip', uid: entry.deletion.uid, summary: entry.deletion.summary, reason: 'delete_guard' } }
-      : entry,
-  );
-  return { entries: held, batch };
-}
-
 async function run(options: ContactSyncOptions): Promise<ContactRunResult | null> {
   const { db, clock, profile, providers } = options;
   const rules = listContactRules(db, profile.id);
@@ -531,7 +514,13 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
 
   const google = await readGoogle(options, cursor.googleSyncToken, bidirectional, !initialDone);
   const planned = plan(options, rules, book, google);
-  const guarded = holdBackDeletions(planned.entries, planned.trackedCount);
+  const guarded = holdBackDeletions(
+    planned.entries,
+    planned.trackedCount,
+    (_entry, deletion): PlanEntry => ({
+      report: { action: 'skip', uid: deletion.uid, summary: deletion.summary, reason: 'delete_guard' },
+    }),
+  );
   const entries = guarded.entries;
 
   if (options.dryRun) {

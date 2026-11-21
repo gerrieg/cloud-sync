@@ -10,7 +10,6 @@ import type {
   GoogleEventDraft,
   GoogleWriteOptions,
 } from './calendar-types.js';
-
 import type {
   AppleContactBook,
   AppleContactWrite,

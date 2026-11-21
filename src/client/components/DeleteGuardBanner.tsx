@@ -30,42 +30,40 @@ export function DeleteGuardBanner({ approvals, onApprove, onDismiss }: DeleteGua
       </p>
 
       <ul className="mt-4 space-y-4">
-        {approvals.map((approval) => {
-          return (
-            <li key={approval.id} className="rounded-lg border border-amber-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-slate-800">
-                {approval.label}
-                {` · ${approval.items.length} ${approval.items.length === 1 ? 'deletion' : 'deletions'}`}
-              </h3>
-              <ul className="mt-2 space-y-0.5 text-sm text-slate-700">
-                {approval.items.map((item, index) => (
-                  <li key={`${item.uid}-${index}`}>
-                    {item.summary}
-                    <span className="text-xs text-slate-500">{` · ${TARGET_LABELS[item.target]}`}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-                  onClick={() => void run(() => onApprove(approval.id))}
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  className={secondaryButtonClass}
-                  onClick={() => void run(() => onDismiss(approval.id))}
-                >
-                  Dismiss
-                </button>
-              </div>
-            </li>
-          );
-        })}
+        {approvals.map((approval) => (
+          <li key={approval.id} className="rounded-lg border border-amber-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-slate-800">
+              {approval.label}
+              {` · ${approval.items.length} ${approval.items.length === 1 ? 'deletion' : 'deletions'}`}
+            </h3>
+            <ul className="mt-2 space-y-0.5 text-sm text-slate-700">
+              {approval.items.map((item, index) => (
+                <li key={`${item.uid}-${index}`}>
+                  {item.summary}
+                  <span className="text-xs text-slate-500">{` · ${TARGET_LABELS[item.target]}`}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                onClick={() => void run(() => onApprove(approval.id))}
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                className={secondaryButtonClass}
+                onClick={() => void run(() => onDismiss(approval.id))}
+              >
+                Dismiss
+              </button>
+            </div>
+          </li>
+        ))}
       </ul>
 
       {error && (

@@ -48,8 +48,6 @@ export function runContactDryRun(profileId: string): Promise<ContactRunResult> {
   return contactsOf(apiRequest(`${profilePath(profileId)}/dry-run`, { method: 'POST', body: { domain: 'contacts' } }));
 }
 
-export function runContactSync(profileId: string, force: boolean): Promise<ContactRunResult & { dryRun: false }> {
-  return contactsOf(
-    apiRequest(`${profilePath(profileId)}/sync`, { method: 'POST', body: { domain: 'contacts', force } }),
-  ) as Promise<ContactRunResult & { dryRun: false }>;
+export function runContactSync(profileId: string, force: boolean): Promise<ContactRunResult> {
+  return contactsOf(apiRequest(`${profilePath(profileId)}/sync`, { method: 'POST', body: { domain: 'contacts', force } }));
 }
