@@ -145,4 +145,20 @@ describe('Building cards and extending groups', () => {
     expect(extended.replace('X-ADDRESSBOOKSERVER-MEMBER:urn:uuid:NEW-UID-1\r\n', '')).toBe(group);
     expect(addGroupMember(extended, 'NEW-UID-1')).toBe(extended);
   });
+
+  it('escapes semicolons, commas and backslashes so structured fields survive the round trip', () => {
+    const data = {
+      ...parseVCard(vcfFixture('apple-contact.vcf')).data,
+      givenName: 'Anna;Lena',
+      familyName: 'Müller, Meier',
+      organization: 'A;B GmbH',
+      note: 'Pfad a\\b; Rest',
+    };
+
+    const text = buildVCard('U1', data);
+
+    expect(text).toContain('N:Müller\\, Meier;Anna\\;Lena;');
+    expect(text).toContain('ORG:A\\;B GmbH');
+    expect(parseVCard(text).data).toMatchObject(data);
+  });
 });

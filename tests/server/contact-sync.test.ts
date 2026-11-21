@@ -103,6 +103,34 @@ describe('One-way contact sync HTTP seam', () => {
     expect(google().map((c) => c.data.givenName)).toContain('Vorname4');
   });
 
+  it('re-links a contact that rejoins a synced group instead of creating a duplicate', async () => {
+    const { sync, google, setGroups, byName } = await setup();
+    await sync();
+
+    setGroups(['u2', 'u3'], ['u3', 'u4']); // u1 leaves Familie and is in no synced group anymore
+    await sync();
+    expect(byName('Vorname1')?.groupResourceNames).toEqual([]);
+
+    setGroups(['u1', 'u2', 'u3'], ['u3', 'u4']);
+    const result = await sync();
+
+    expect(result.actions.some((a) => a.action === 'create')).toBe(false);
+    expect(google().filter((c) => c.data.givenName === 'Vorname1')).toHaveLength(1);
+    expect(byName('Vorname1')?.groupResourceNames).toEqual([G_FAMILIE]);
+  });
+
+  it('leaves a contact alone whose Apple vCard cannot be read, instead of deleting it in Google', async () => {
+    const { sync, google, world, appleId } = await setup();
+    await sync();
+
+    world.putAppleVCard(appleId, '/card/u1.vcf', 'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Kaputt\r\nEND:VCARD\r\n');
+    const result = await sync();
+
+    expect(result.actions).toContainEqual(expect.objectContaining({ action: 'skip', uid: 'u1', reason: 'invalid_vcard' }));
+    expect(result.actions.some((a) => a.action === 'delete')).toBe(false);
+    expect(google()).toHaveLength(4);
+  });
+
   it('deletes the Google contact when the contact is actually deleted in Apple', async () => {
     const { sync, google, world, appleId } = await setup();
     await sync();

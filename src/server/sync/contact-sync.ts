@@ -179,8 +179,21 @@ function plan(
     if ((entry && inScope(row.appleContactUid)) || isFrozen(row)) {
       continue;
     }
+    // A card that cannot be read is not a deleted contact: leave it and its Google contact alone
+    if (!entry && book.unreadableHrefs.has(row.appleHref)) {
+      entries.push({ report: report('skip', row.appleContactUid, row.summary, 'invalid_vcard') });
+      continue;
+    }
+    // A released contact (no labels left) is no longer managed in Google; only the record remains
+    const released = parseLabels(row).length === 0;
+    if (entry) {
+      if (!released) {
+        entries.push(leave(row));
+      }
+      continue;
+    }
     // A deleted contact can linger in group cards for a while, so absence from the book decides
-    entries.push(entry ? leave(row) : remove(row));
+    entries.push(released ? release(row) : remove(row));
   }
 
   for (const contact of unclaimed) {
@@ -398,7 +411,11 @@ function plan(
     };
   }
 
-  /** The contact is still in the address book but in no synced group: drop the labels, keep the contact. */
+  /**
+   * The contact is still in the address book but in no synced group: drop the labels, keep the
+   * Google contact. The record stays (without labels), so a contact that rejoins a group is
+   * re-linked instead of duplicated.
+   */
   function leave(row: SyncedContactRow): PlanEntry {
     const stored = parseLabels(row);
     return {
@@ -409,8 +426,16 @@ function plan(
             providers.google.contacts.update(row.googleResourceName, { addGroups: [], removeGroups: stored }),
           );
         }
-        deleteSyncedContact(db, row.id);
+        updateSyncedContact(db, row.id, { labels: '[]' });
       },
+    };
+  }
+
+  /** A released contact was deleted in Apple: its Google contact is not ours to delete, just forget it. */
+  function release(row: SyncedContactRow): PlanEntry {
+    return {
+      report: report('skip', row.appleContactUid, row.summary, 'no_longer_synced'),
+      apply: async () => deleteSyncedContact(db, row.id),
     };
   }
 

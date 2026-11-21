@@ -51,9 +51,12 @@ export function createRealAppleContacts(credentials: AppleCredentials | null): A
       const cards = await client.fetchVCards({ addressBook });
       return {
         ctag: typeof addressBook.ctag === 'string' ? addressBook.ctag : null,
-        objects: cards.flatMap((card) =>
-          typeof card.data === 'string' ? [{ href: card.url, etag: card.etag ?? '', vcard: card.data }] : [],
-        ),
+        // A card without data stays in the list (as unreadable) so it is not taken for a deleted contact
+        objects: cards.map((card) => ({
+          href: card.url,
+          etag: card.etag ?? '',
+          vcard: typeof card.data === 'string' ? card.data : '',
+        })),
       };
     },
     async putObject(input) {
