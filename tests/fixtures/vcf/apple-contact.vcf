@@ -1,0 +1,25 @@
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iOS 18.2//EN
+N:Muster;Max;Karl;Dr.;jun.
+FN:Dr. Max Karl Muster jun.
+ORG:Muster GmbH;Vertrieb
+TITLE:Leiter
+EMAIL;type=INTERNET;type=HOME;type=pref:max@example.com
+item1.EMAIL;type=INTERNET:max.work@example.com
+item1.X-ABLabel:Büro
+TEL;type=CELL;type=VOICE;type=pref:+49 170 1234567
+item2.TEL:+49 30 555 0100
+item2.X-ABLabel:_$!<Main>!$_
+ADR;type=HOME;type=pref:;;Hauptstraße 1;Berlin;BE;10115;Deutschland
+NOTE:Kunde seit 2020\nZahlt pünktlich
+BDAY;value=date:1985-03-12
+X-SOCIALPROFILE;type=twitter;x-user=maxmuster:http://twitter.com/maxmuster
+X-ABADR:de
+REV:2026-01-05T09:00:00Z
+UID:3E7A1D52-1111-4B1E-9A11-AAAAAAAAAAAA
+PHOTO;ENCODING=b;TYPE=PNG:iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf
+ FcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAA
+ AABJRU5ErkJggg==
+X-ABUID:3E7A1D52-1111-4B1E-9A11-AAAAAAAAAAAA\:ABPerson
+END:VCARD

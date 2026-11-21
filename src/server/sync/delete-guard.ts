@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { DeleteApprovalDto, DeleteApprovalItemDto } from '../../shared/delete-guard.js';
 import type { AppDatabase } from '../db/index.js';
-import { pendingDeleteApprovals } from '../db/schema.js';
+import { calendarSyncRules, pendingDeleteApprovals } from '../db/schema.js';
 
 /** A run that plans more deletions than this, or a larger share of the tracked items, is halted. */
 const DELETE_GUARD_MAX_ITEMS = 10;
@@ -28,7 +28,9 @@ export function queueDeletions(
   db: AppDatabase,
   input: {
     readonly profileId: string;
-    readonly ruleId: string;
+    readonly domain: 'calendar' | 'contacts';
+    /** The Sync Rule of a calendar batch; null for the profile-wide contact sync. */
+    readonly ruleId: string | null;
     readonly items: readonly GuardedDeletion[];
     readonly now: number;
   },
@@ -39,7 +41,9 @@ export function queueDeletions(
     .from(pendingDeleteApprovals)
     .where(
       and(
-        eq(pendingDeleteApprovals.ruleId, input.ruleId),
+        eq(pendingDeleteApprovals.profileId, input.profileId),
+        eq(pendingDeleteApprovals.domain, input.domain),
+        input.ruleId === null ? isNull(pendingDeleteApprovals.ruleId) : eq(pendingDeleteApprovals.ruleId, input.ruleId),
         eq(pendingDeleteApprovals.status, 'pending'),
         eq(pendingDeleteApprovals.items, items),
       ),
@@ -53,6 +57,7 @@ export function queueDeletions(
     .values({
       id: crypto.randomUUID(),
       profileId: input.profileId,
+      domain: input.domain,
       ruleId: input.ruleId,
       items,
       createdAt: input.now,
@@ -94,10 +99,20 @@ export function approvalItems<T extends GuardedDeletion>(row: ApprovalRow): T[] 
   return JSON.parse(row.items) as T[];
 }
 
-export function toApprovalDto(row: ApprovalRow): DeleteApprovalDto {
+/** What a batch belongs to, for display. */
+function approvalLabel(db: AppDatabase, row: ApprovalRow): string {
+  const rule = row.ruleId
+    ? db.select().from(calendarSyncRules).where(eq(calendarSyncRules.id, row.ruleId)).get()
+    : undefined;
+  return rule ? `${rule.appleCalendarName} → ${rule.googleCalendarName}` : 'Contacts';
+}
+
+export function toApprovalDto(db: AppDatabase, row: ApprovalRow): DeleteApprovalDto {
   return {
     id: row.id,
+    domain: row.domain,
     ruleId: row.ruleId,
+    label: approvalLabel(db, row),
     status: row.status,
     createdAt: row.createdAt,
     items: approvalItems(row).map(({ uid, summary, target }) => ({ uid, summary, target })),

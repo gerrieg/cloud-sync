@@ -56,6 +56,13 @@ export function installBackend(initial: ProfileFixture[], extra?: (call: Recorde
       return override;
     }
 
+    // Every connected Profile page asks for these; most tests have nothing to say about them
+    if (method === 'GET' && /^\/api\/profiles\/[^/]+\/rules\/contacts$/.test(path)) return json([]);
+    if (method === 'GET' && /^\/api\/profiles\/[^/]+\/discover\/contact-groups$/.test(path)) {
+      return json({ apple: [], google: [] });
+    }
+    if (method === 'GET' && /^\/api\/profiles\/[^/]+\/delete-approvals$/.test(path)) return json([]);
+
     if (path === '/api/auth/me') return json({ username: 'admin' });
     if (path === '/api/auth/logout') return json({ ok: true });
     if (path === '/api/profiles' && method === 'GET') return json(profiles);

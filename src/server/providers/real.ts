@@ -3,6 +3,8 @@ import { ImapFlow } from 'imapflow';
 import { createDAVClient } from 'tsdav';
 import type { AppleConnectionReport, ProtocolCheckResult } from '../../shared/profile.js';
 import { createRealAppleCalendars, createRealGoogleCalendars } from './real-calendar.js';
+import { createRealAppleContacts, createRealGoogleContacts } from './real-contacts.js';
+import { createRateLimiter } from './rate-limiter.js';
 import {
   GOOGLE_INVALID_GRANT,
   GoogleAuthError,
@@ -109,7 +111,21 @@ function createOAuthClient(config: RealProvidersConfig, redirectUri: string) {
   return new google.auth.OAuth2(config.googleClientId, config.googleClientSecret, redirectUri);
 }
 
+/** The Google People API asks for about one request per second per user. */
+const PEOPLE_API_MIN_INTERVAL_MS = 1000;
+
 export function createRealSyncProviders(config: RealProvidersConfig): SyncProvidersFactory {
+  // One limiter per Profile, shared by all runs, so overlapping requests still respect the quota
+  const limiters = new Map<string, ReturnType<typeof createRateLimiter>>();
+  const limiterFor = (profileId: string) => {
+    let limiter = limiters.get(profileId);
+    if (!limiter) {
+      limiter = createRateLimiter(PEOPLE_API_MIN_INTERVAL_MS);
+      limiters.set(profileId, limiter);
+    }
+    return limiter;
+  };
+
   return (context): SyncProviders => ({
     apple: {
       async testConnection(): Promise<AppleConnectionReport> {
@@ -126,9 +142,11 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
         return { caldav, carddav, imap };
       },
       calendars: createRealAppleCalendars(context.apple),
+      contacts: createRealAppleContacts(context.apple),
     },
     google: {
       calendars: createRealGoogleCalendars(config, context.googleTokens),
+      contacts: createRealGoogleContacts(config, context.googleTokens, limiterFor(context.profileId)),
       buildAuthUrl({ redirectUri, state }) {
         return createOAuthClient(config, redirectUri).generateAuthUrl({
           access_type: 'offline',

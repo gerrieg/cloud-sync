@@ -7,8 +7,10 @@ import type {
 import type { Clock } from '../clock.js';
 import type { AppConfig } from '../config.js';
 import type { AppDatabase } from '../db/index.js';
+import { updateProfile } from '../profiles/profile-store.js';
 import { GoogleAuthError, type SyncProvidersFactory } from '../providers/types.js';
 import { removeTrackedGoogleEvents, runCalendarSync } from '../sync/calendar-sync.js';
+import { runContactSync } from '../sync/contact-sync.js';
 import { listPendingApprovals, toApprovalDto } from '../sync/delete-guard.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
 import {
@@ -85,23 +87,29 @@ export function createCalendarRoutes(deps: CalendarRouteDeps): Hono<ProfileEnv> 
         if (!dryRun && !profile.enabled) {
           return c.json({ error: 'This Profile is paused' }, 409);
         }
-        const result = await runCalendarSync({
-          db,
-          clock,
-          profile,
-          appleId,
-          providers,
-          dryRun,
-          force: body?.force === true,
-        });
-        return c.json(result, 200);
+        // `domain` narrows a run to one kind of data; without it everything is synced
+        const domain = body?.domain === 'calendars' || body?.domain === 'contacts' ? body.domain : 'all';
+        const force = body?.force === true;
+        const calendars =
+          domain === 'contacts'
+            ? { dryRun, rules: [] }
+            : await runCalendarSync({ db, clock, profile, appleId, providers, dryRun, force });
+        const contacts =
+          domain === 'calendars' ? null : await runContactSync({ db, clock, profile, providers, dryRun, force });
+        if (!dryRun && (domain === 'contacts' || contacts?.status === 'error')) {
+          updateProfile(db, profile.id, {
+            lastSyncAt: clock.now(),
+            lastSyncStatus: contacts?.status === 'error' || profile.lastSyncStatus === 'error' ? 'error' : 'ok',
+          });
+        }
+        return c.json({ ...calendars, ...(contacts ? { contacts } : {}) }, 200);
       },
       { exclusive: true },
     );
   }
 
   routes.get('/:id/delete-approvals', (c) =>
-    c.json(listPendingApprovals(db, c.get('profile').id).map(toApprovalDto), 200),
+    c.json(listPendingApprovals(db, c.get('profile').id).map((row) => toApprovalDto(db, row)), 200),
   );
 
   routes.post('/:id/sync', (c) => runSync(c, false));

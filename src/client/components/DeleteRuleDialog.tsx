@@ -1,16 +1,22 @@
 import { useState } from 'react';
-import type { CalendarRuleDto } from '../lib/calendar-api.js';
 import { secondaryButtonClass } from '../lib/styles.js';
 
 interface DeleteRuleDialogProps {
-  rule: CalendarRuleDto;
+  /** e.g. `Delete calendar rule`. */
+  title: string;
+  /** Names the rule, e.g. `Privat → Anna`. */
+  ruleLabel: string;
+  /** What stays in Google, e.g. `events`. */
+  items: string;
+  /** Label of the cleanup opt-in checkbox. */
+  cleanupLabel: string;
   busy: boolean;
   onConfirm(cleanupGoogle: boolean): void;
   onCancel(): void;
 }
 
 /** Deleting a rule keeps the synced Google events unless the admin explicitly opts in to cleanup. */
-export function DeleteRuleDialog({ rule, busy, onConfirm, onCancel }: DeleteRuleDialogProps) {
+export function DeleteRuleDialog({ title, ruleLabel, items, cleanupLabel, busy, onConfirm, onCancel }: DeleteRuleDialogProps) {
   const [cleanupGoogle, setCleanupGoogle] = useState(false);
 
   return (
@@ -22,11 +28,11 @@ export function DeleteRuleDialog({ rule, busy, onConfirm, onCancel }: DeleteRule
         className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg"
       >
         <h3 id="delete-rule-title" className="text-lg font-semibold text-slate-900">
-          Delete calendar rule
+          {title}
         </h3>
         <p className="mt-2 text-sm text-slate-600">
-          {`${rule.appleCalendarName} → ${rule.googleCalendarName}`} will no longer be synced. The events
-          already in Google stay untouched unless you tick the option below.
+          {ruleLabel} will no longer be synced. The {items} already in Google stay untouched unless you tick
+          the option below.
         </p>
         <label className="mt-4 flex items-start gap-2 text-sm text-slate-700">
           <input
@@ -35,7 +41,7 @@ export function DeleteRuleDialog({ rule, busy, onConfirm, onCancel }: DeleteRule
             checked={cleanupGoogle}
             onChange={(event) => setCleanupGoogle(event.target.checked)}
           />
-          Also remove the synced events from Google
+          {cleanupLabel}
         </label>
         <div className="mt-6 flex justify-end gap-2">
           <button type="button" className={secondaryButtonClass} onClick={onCancel}>

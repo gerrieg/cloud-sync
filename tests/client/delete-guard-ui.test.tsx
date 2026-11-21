@@ -26,7 +26,9 @@ const RULE: CalendarRuleDto = {
 
 const BATCH: DeleteApprovalDto = {
   id: 'd1',
+  domain: 'calendar',
   ruleId: 'r1',
+  label: 'Privat → Anna',
   status: 'pending',
   createdAt: Date.UTC(2026, 0, 15, 12, 0, 0),
   items: [

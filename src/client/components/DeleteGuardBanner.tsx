@@ -1,11 +1,9 @@
-import type { CalendarRuleDto } from '../../shared/calendar.js';
 import type { DeleteApprovalDto } from '../lib/delete-approvals-api.js';
 import { secondaryButtonClass } from '../lib/styles.js';
 import { useAsyncAction } from '../lib/use-async-action.js';
 
 interface DeleteGuardBannerProps {
   approvals: readonly DeleteApprovalDto[];
-  rules: readonly CalendarRuleDto[];
   onApprove(approvalId: string): Promise<void>;
   onDismiss(approvalId: string): Promise<void>;
 }
@@ -13,7 +11,7 @@ interface DeleteGuardBannerProps {
 const TARGET_LABELS = { apple: 'Delete from Apple', google: 'Delete from Google' } as const;
 
 /** Prominent alert for deletion batches a sync run halted until the admin decides. */
-export function DeleteGuardBanner({ approvals, rules, onApprove, onDismiss }: DeleteGuardBannerProps) {
+export function DeleteGuardBanner({ approvals, onApprove, onDismiss }: DeleteGuardBannerProps) {
   const { busy, error, run } = useAsyncAction();
   if (approvals.length === 0) {
     return null;
@@ -33,11 +31,10 @@ export function DeleteGuardBanner({ approvals, rules, onApprove, onDismiss }: De
 
       <ul className="mt-4 space-y-4">
         {approvals.map((approval) => {
-          const rule = rules.find((r) => r.id === approval.ruleId);
           return (
             <li key={approval.id} className="rounded-lg border border-amber-200 bg-white p-4">
               <h3 className="text-sm font-semibold text-slate-800">
-                {rule ? `${rule.appleCalendarName} → ${rule.googleCalendarName}` : approval.ruleId}
+                {approval.label}
                 {` · ${approval.items.length} ${approval.items.length === 1 ? 'deletion' : 'deletions'}`}
               </h3>
               <ul className="mt-2 space-y-0.5 text-sm text-slate-700">

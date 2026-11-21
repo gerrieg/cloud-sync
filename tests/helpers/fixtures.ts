@@ -24,3 +24,8 @@ export function simpleIcs(uid: string, summary: string, day = 10): string {
     '',
   ].join('\r\n');
 }
+
+/** Reads an Apple-style `.vcf` fixture from tests/fixtures/vcf. */
+export function vcfFixture(name: string): string {
+  return fs.readFileSync(path.resolve(__dirname, '../fixtures/vcf', name), 'utf8');
+}

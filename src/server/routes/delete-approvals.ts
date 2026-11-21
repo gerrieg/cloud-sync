@@ -5,6 +5,7 @@ import type { AppDatabase } from '../db/index.js';
 import { findProfile } from '../profiles/profile-store.js';
 import { GoogleAuthError, type SyncProvidersFactory } from '../providers/types.js';
 import { executeCalendarDeletion, type CalendarDeletion } from '../sync/calendar-sync.js';
+import { executeContactDeletion, type ContactDeletion } from '../sync/contact-sync.js';
 import {
   approvalItems,
   findApproval,
@@ -46,14 +47,20 @@ export function createDeleteApprovalRoutes(deps: DeleteApprovalRouteDeps): Hono<
       c,
       async (providers, profile) => {
         const approval = findApproval(db, c.req.param('id') ?? '');
-        const rule = approval ? findRule(db, profile.id, approval.ruleId) : undefined;
-        if (!approval || approval.status !== 'pending' || !rule) {
+        const rule = approval?.ruleId ? findRule(db, profile.id, approval.ruleId) : undefined;
+        if (!approval || approval.status !== 'pending' || (approval.domain === 'calendar' && !rule)) {
           return c.json({ error: 'This deletion batch is no longer pending' }, 409);
         }
         try {
           // Exactly the batch that was recorded when the run was halted, nothing re-planned
-          for (const item of approvalItems<CalendarDeletion>(approval)) {
-            await executeCalendarDeletion({ db, providers, rule }, item);
+          if (approval.domain === 'contacts') {
+            for (const item of approvalItems<ContactDeletion>(approval)) {
+              await executeContactDeletion({ db, providers }, item);
+            }
+          } else {
+            for (const item of approvalItems<CalendarDeletion>(approval)) {
+              await executeCalendarDeletion({ db, providers, rule: rule! }, item);
+            }
           }
         } catch (error) {
           if (error instanceof GoogleAuthError) {
@@ -63,7 +70,7 @@ export function createDeleteApprovalRoutes(deps: DeleteApprovalRouteDeps): Hono<
           return c.json({ error: 'Could not execute the deletions; the batch is still pending' }, 502);
         }
         const resolved = resolveApproval(db, approval.id, 'approved', clock.now());
-        return c.json(toApprovalDto(resolved ?? approval), 200);
+        return c.json(toApprovalDto(db, resolved ?? approval), 200);
       },
       { exclusive: true },
     ),
@@ -73,7 +80,7 @@ export function createDeleteApprovalRoutes(deps: DeleteApprovalRouteDeps): Hono<
     locks.run(c.get('profile').id, async () => {
       const resolved = resolveApproval(db, c.req.param('id') ?? '', 'dismissed', clock.now());
       return resolved
-        ? c.json(toApprovalDto(resolved), 200)
+        ? c.json(toApprovalDto(db, resolved), 200)
         : c.json({ error: 'This deletion batch is no longer pending' }, 409);
     }),
   );

@@ -1,8 +1,13 @@
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
+import { approveDeletions, dismissDeletions } from '../lib/delete-approvals-api.js';
 import { readOAuthRedirect } from '../lib/oauth-redirect.js';
+import { useDeleteApprovals } from '../lib/use-delete-approvals.js';
+import type { Profile } from '../lib/profiles-api.js';
 import { useProfiles } from '../lib/use-profiles.js';
 import { AppleConnection } from './AppleConnection.js';
 import { CalendarSyncPanel } from './CalendarSyncPanel.js';
+import { ContactSyncPanel } from './ContactSyncPanel.js';
+import { DeleteGuardBanner } from './DeleteGuardBanner.js';
 import { GoogleConnection } from './GoogleConnection.js';
 import { ProfileSettingsPanel } from './ProfileSettingsPanel.js';
 import { ProfileSwitcher } from './ProfileSwitcher.js';
@@ -11,6 +16,38 @@ import { TriggerTokenPanel } from './TriggerTokenPanel.js';
 interface AppShellProps {
   username: string;
   onLogout(): Promise<void>;
+}
+
+interface SelectedProfileProps {
+  profile: Profile;
+  outcome: ComponentProps<typeof GoogleConnection>['outcome'];
+  onChange: ComponentProps<typeof ProfileSettingsPanel>['onChange'];
+  onDeleted: ComponentProps<typeof ProfileSettingsPanel>['onDeleted'];
+}
+
+/** Everything about the selected Profile; owns its Delete Guard batches, which sync runs may add. */
+function SelectedProfile({ profile, outcome, onChange, onDeleted }: SelectedProfileProps) {
+  const { approvals, refresh } = useDeleteApprovals(profile.id);
+  const decide = (decision: (approvalId: string) => Promise<unknown>) => async (approvalId: string) => {
+    await decision(approvalId);
+    await refresh();
+  };
+
+  return (
+    <>
+      <DeleteGuardBanner
+        approvals={approvals}
+        onApprove={decide(approveDeletions)}
+        onDismiss={decide(dismissDeletions)}
+      />
+      <ProfileSettingsPanel profile={profile} onChange={onChange} onDeleted={onDeleted} />
+      <AppleConnection profile={profile} onChange={onChange} />
+      <GoogleConnection profile={profile} outcome={outcome} />
+      <CalendarSyncPanel profile={profile} onSynced={refresh} />
+      <ContactSyncPanel profile={profile} onSynced={refresh} />
+      <TriggerTokenPanel profile={profile} />
+    </>
+  );
 }
 
 export function AppShell({ username, onLogout }: AppShellProps) {
@@ -77,16 +114,12 @@ export function AppShell({ username, onLogout }: AppShellProps) {
           </section>
         )}
         {selected && (
-          <>
-            <ProfileSettingsPanel profile={selected} onChange={replace} onDeleted={remove} />
-            <AppleConnection profile={selected} onChange={replace} />
-            <GoogleConnection
-              profile={selected}
-              outcome={selected.id === oauthRedirect.profileId ? oauthRedirect.outcome : null}
-            />
-            <CalendarSyncPanel profile={selected} />
-            <TriggerTokenPanel profile={selected} />
-          </>
+          <SelectedProfile
+            profile={selected}
+            outcome={selected.id === oauthRedirect.profileId ? oauthRedirect.outcome : null}
+            onChange={replace}
+            onDeleted={remove}
+          />
         )}
       </main>
     </div>

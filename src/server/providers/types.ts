@@ -11,6 +11,15 @@ import type {
   GoogleWriteOptions,
 } from './calendar-types.js';
 
+import type {
+  AppleContactBook,
+  AppleContactWrite,
+  GoogleContact,
+  GoogleContactChanges,
+  GoogleContactGroupInfo,
+  GoogleContactWrite,
+} from './contact-types.js';
+
 export interface AppleCredentials {
   readonly appleId: string;
   readonly appPassword: string;
@@ -58,6 +67,13 @@ export interface SyncProviders {
        */
       deleteObject(href: string, etag: string): Promise<void>;
     };
+    /** The single iCloud address book: contacts and contact groups are vCards in it. */
+    readonly contacts: {
+      list(): Promise<AppleContactBook>;
+      /** Same contract as the calendar `putObject`: typed errors for 412 and 404. */
+      putObject(input: AppleContactWrite): Promise<AppleObjectRef>;
+      deleteObject(href: string, etag: string): Promise<void>;
+    };
   };
   readonly google: {
     buildAuthUrl(input: { readonly redirectUri: string; readonly state: string }): string;
@@ -90,6 +106,19 @@ export interface SyncProviders {
       ): Promise<GoogleEvent>;
       /** Throws GoogleEventNotFoundError if the event no longer exists. */
       deleteEvent(calendarId: string, eventId: string, options: GoogleWriteOptions): Promise<void>;
+    };
+    /** People API calls are throttled to about one per second per Profile by the adapter. */
+    readonly contacts: {
+      /** The user's own contact groups (labels). */
+      listGroups(): Promise<GoogleContactGroupInfo[]>;
+      /** Same contract as the calendar `listChanges`: null token = full listing, stale = expired error. */
+      listChanges(syncToken: string | null): Promise<GoogleContactChanges>;
+      create(write: GoogleContactWrite): Promise<GoogleContact>;
+      /** Throws GoogleContactNotFoundError if the contact no longer exists. */
+      update(resourceName: string, write: GoogleContactWrite): Promise<GoogleContact>;
+      /** Throws GoogleContactNotFoundError if the contact no longer exists. */
+      delete(resourceName: string): Promise<void>;
+      updatePhoto(resourceName: string, photo: Buffer): Promise<void>;
     };
   };
 }

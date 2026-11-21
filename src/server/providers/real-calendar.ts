@@ -117,7 +117,7 @@ export function createRealAppleCalendars(credentials: AppleCredentials | null): 
 }
 
 /** Maps the status of a CalDAV write to the typed errors of the SyncProviders seam. */
-function assertCalDavWrite(response: Response, href: string): void {
+export function assertCalDavWrite(response: Response, href: string): void {
   if (response.ok) {
     return;
   }
@@ -130,12 +130,12 @@ function assertCalDavWrite(response: Response, href: string): void {
   throw new Error(`CalDAV write to ${href} failed (${response.status})`);
 }
 
-function httpStatus(error: unknown): number | undefined {
+export function httpStatus(error: unknown): number | undefined {
   const status = (error as { code?: unknown; response?: { status?: unknown } } | null)?.response?.status;
   return typeof status === 'number' ? status : undefined;
 }
 
-function isInvalidGrant(error: unknown): boolean {
+export function isInvalidGrant(error: unknown): boolean {
   const data = (error as { response?: { data?: { error?: unknown } } } | null)?.response?.data;
   return data?.error === GOOGLE_INVALID_GRANT || (error instanceof Error && error.message.includes(GOOGLE_INVALID_GRANT));
 }

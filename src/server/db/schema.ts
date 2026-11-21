@@ -77,14 +77,75 @@ export const syncedEvents = sqliteTable(
   (table) => [uniqueIndex('synced_events_rule_href_idx').on(table.ruleId, table.appleHref)],
 );
 
+export const contactSyncRules = sqliteTable(
+  'contact_sync_rules',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    /** UID of the Apple contact group, or `all` for the whole address book ("All Contacts"). */
+    appleGroupUid: text('apple_group_uid').notNull(),
+    appleGroupName: text('apple_group_name').notNull(),
+    googleGroupResourceName: text('google_group_resource_name').notNull(),
+    googleGroupName: text('google_group_name').notNull(),
+    direction: text('direction', { enum: ['one_way', 'bidirectional'] })
+      .notNull()
+      .default('one_way'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    initialSyncCompletedAt: integer('initial_sync_completed_at'),
+  },
+  (table) => [
+    uniqueIndex('contact_sync_rules_pair_idx').on(
+      table.profileId,
+      table.appleGroupUid,
+      table.googleGroupResourceName,
+    ),
+  ],
+);
+
+/** Contacts are deduplicated profile-wide: one record per Apple contact, whatever groups it is in. */
+export const syncedContacts = sqliteTable(
+  'synced_contacts',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    appleContactUid: text('apple_contact_uid').notNull(),
+    appleHref: text('apple_href').notNull(),
+    appleEtag: text('apple_etag').notNull(),
+    summary: text('summary').notNull(),
+    googleResourceName: text('google_resource_name').notNull(),
+    /** Content hash of the Google contact as last written or read (tells echoes from real edits). */
+    googleFingerprint: text('google_fingerprint').notNull().default(''),
+    /** Hash of the Apple photo last uploaded to Google; equal hash means nothing to upload. */
+    photoHash: text('photo_hash').notNull().default(''),
+    /** JSON array of the Google labels (contact group resource names) this sync put on the contact. */
+    labels: text('labels').notNull().default('[]'),
+  },
+  (table) => [uniqueIndex('synced_contacts_profile_uid_idx').on(table.profileId, table.appleContactUid)],
+);
+
+/** Profile-wide cursors of the contact sync. */
+export const contactSyncState = sqliteTable('contact_sync_state', {
+  profileId: text('profile_id')
+    .primaryKey()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  appleCtag: text('apple_ctag'),
+  googleSyncToken: text('google_sync_token'),
+});
+
 export const pendingDeleteApprovals = sqliteTable('pending_delete_approvals', {
   id: text('id').primaryKey(),
   profileId: text('profile_id')
     .notNull()
     .references(() => profiles.id, { onDelete: 'cascade' }),
-  ruleId: text('rule_id')
+  domain: text('domain', { enum: ['calendar', 'contacts'] })
     .notNull()
-    .references(() => calendarSyncRules.id, { onDelete: 'cascade' }),
+    .default('calendar'),
+  /** The Sync Rule of a calendar batch; contact batches are profile-wide and have none. */
+  ruleId: text('rule_id').references(() => calendarSyncRules.id, { onDelete: 'cascade' }),
   status: text('status', { enum: ['pending', 'approved', 'dismissed'] })
     .notNull()
     .default('pending'),

@@ -668,6 +668,7 @@ async function runRule(context: RuleContext): Promise<RuleRunResult> {
     guarded.batch.length > 0
       ? queueDeletions(options.db, {
           profileId: options.profile.id,
+          domain: 'calendar',
           ruleId: rule.id,
           items: guarded.batch,
           now: options.clock.now(),

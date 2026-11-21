@@ -1,0 +1,289 @@
+import { google, type people_v1 } from 'googleapis';
+import { createDAVClient } from 'tsdav';
+import { GoogleSyncTokenExpiredError } from './calendar-types.js';
+import {
+  GoogleContactNotFoundError,
+  type AppleContactBook,
+  type ContactData,
+  type GoogleContact,
+  type GoogleContactChanges,
+  type GoogleContactGroupInfo,
+  type GoogleContactWrite,
+} from './contact-types.js';
+import { assertCalDavWrite, httpStatus, isInvalidGrant, type GoogleClientConfig } from './real-calendar.js';
+import {
+  GOOGLE_INVALID_GRANT,
+  GoogleAuthError,
+  type AppleCredentials,
+  type GoogleTokens,
+  type SyncProviders,
+} from './types.js';
+
+const ICLOUD_CARDDAV_URL = 'https://contacts.icloud.com';
+const PERSON_FIELDS = 'names,emailAddresses,phoneNumbers,organizations,birthdays,addresses,biographies,memberships';
+const MY_CONTACTS = 'contactGroups/myContacts';
+
+type AppleContacts = SyncProviders['apple']['contacts'];
+type GoogleContacts = SyncProviders['google']['contacts'];
+
+export function createRealAppleContacts(credentials: AppleCredentials | null): AppleContacts {
+  async function connect() {
+    if (!credentials) {
+      throw new Error('No Apple credentials configured');
+    }
+    const client = await createDAVClient({
+      serverUrl: ICLOUD_CARDDAV_URL,
+      credentials: { username: credentials.appleId, password: credentials.appPassword },
+      authMethod: 'Basic',
+      defaultAccountType: 'carddav',
+    });
+    // iCloud keeps all contacts, and the contact groups as vCards, in one address book
+    const addressBook = (await client.fetchAddressBooks())[0];
+    if (!addressBook) {
+      throw new Error('No iCloud address book found');
+    }
+    return { client, addressBook };
+  }
+
+  return {
+    async list(): Promise<AppleContactBook> {
+      const { client, addressBook } = await connect();
+      const cards = await client.fetchVCards({ addressBook });
+      return {
+        ctag: typeof addressBook.ctag === 'string' ? addressBook.ctag : null,
+        objects: cards.flatMap((card) =>
+          typeof card.data === 'string' ? [{ href: card.url, etag: card.etag ?? '', vcard: card.data }] : [],
+        ),
+      };
+    },
+    async putObject(input) {
+      const { client, addressBook } = await connect();
+      const href = input.href ?? new URL(`${encodeURIComponent(input.uid)}.vcf`, addressBook.url).href;
+      const response =
+        input.href === null
+          ? await client.createVCard({
+              addressBook,
+              filename: href.slice(href.lastIndexOf('/') + 1),
+              vCardString: input.vcard,
+            })
+          : await client.updateVCard({
+              vCard: { url: href, data: input.vcard, etag: input.etag ?? undefined },
+            });
+      assertCalDavWrite(response, href);
+
+      // iCloud does not always answer a PUT with the new ETag: read it back
+      const etag =
+        response.headers.get('etag') ??
+        (await client.fetchVCards({ addressBook, objectUrls: [href] }))[0]?.etag;
+      if (!etag) {
+        throw new Error(`CardDAV did not report an ETag for ${href}`);
+      }
+      return { href, etag };
+    },
+    async deleteObject(href, etag) {
+      const { client } = await connect();
+      assertCalDavWrite(await client.deleteVCard({ vCard: { url: href, etag } }), href);
+    },
+  };
+}
+
+function fromPerson(person: people_v1.Schema$Person): GoogleContact {
+  const name = person.names?.[0];
+  const organization = person.organizations?.[0];
+  const birthday = person.birthdays?.[0]?.date;
+  const pad = (value: number, width: number) => String(value).padStart(width, '0');
+  const data: ContactData = {
+    givenName: name?.givenName ?? '',
+    familyName: name?.familyName ?? '',
+    middleName: name?.middleName ?? '',
+    prefix: name?.honorificPrefix ?? '',
+    suffix: name?.honorificSuffix ?? '',
+    organization: organization?.name ?? '',
+    title: organization?.title ?? '',
+    emails: (person.emailAddresses ?? []).flatMap((e) => (e.value ? [e.value] : [])),
+    phones: (person.phoneNumbers ?? []).flatMap((p) => (p.value ? [p.value] : [])),
+    // A birthday without a year has no vCard-neutral form here, so it is not synced
+    birthday: birthday?.year && birthday.month && birthday.day ? `${pad(birthday.year, 4)}-${pad(birthday.month, 2)}-${pad(birthday.day, 2)}` : null,
+    addresses: (person.addresses ?? []).map((a) => ({
+      street: a.streetAddress ?? '',
+      city: a.city ?? '',
+      region: a.region ?? '',
+      postalCode: a.postalCode ?? '',
+      country: a.country ?? '',
+    })),
+    note: person.biographies?.[0]?.value ?? '',
+  };
+  return {
+    resourceName: person.resourceName ?? '',
+    data,
+    groupResourceNames: (person.memberships ?? []).flatMap((m) =>
+      m.contactGroupMembership?.contactGroupResourceName ? [m.contactGroupMembership.contactGroupResourceName] : [],
+    ),
+  };
+}
+
+function toPerson(data: ContactData): people_v1.Schema$Person {
+  const [year, month, day] = (data.birthday ?? '').split('-').map(Number);
+  return {
+    names: [
+      {
+        givenName: data.givenName,
+        familyName: data.familyName,
+        middleName: data.middleName,
+        honorificPrefix: data.prefix,
+        honorificSuffix: data.suffix,
+      },
+    ],
+    organizations: data.organization || data.title ? [{ name: data.organization, title: data.title }] : [],
+    emailAddresses: data.emails.map((value) => ({ value })),
+    phoneNumbers: data.phones.map((value) => ({ value })),
+    birthdays: data.birthday ? [{ date: { year, month, day } }] : [],
+    addresses: data.addresses.map((a) => ({
+      streetAddress: a.street,
+      city: a.city,
+      region: a.region,
+      postalCode: a.postalCode,
+      country: a.country,
+    })),
+    biographies: data.note ? [{ value: data.note, contentType: 'TEXT_PLAIN' }] : [],
+  };
+}
+
+const membership = (resourceName: string) => ({ contactGroupMembership: { contactGroupResourceName: resourceName } });
+
+export function createRealGoogleContacts(
+  config: GoogleClientConfig,
+  tokens: GoogleTokens | null,
+  /** Spaces the People API calls of one Profile (about one request per second). */
+  limit: <T>(call: () => Promise<T>) => Promise<T>,
+): GoogleContacts {
+  function client(): people_v1.People {
+    if (!tokens) {
+      throw new Error('Google account is not connected');
+    }
+    const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
+    auth.setCredentials({ ...tokens });
+    return google.people({ version: 'v1', auth });
+  }
+
+  async function guarded<T>(call: (people: people_v1.People) => Promise<T>, resourceName?: string): Promise<T> {
+    try {
+      return await limit(() => call(client()));
+    } catch (error) {
+      if (isInvalidGrant(error)) {
+        throw new GoogleAuthError(GOOGLE_INVALID_GRANT, error instanceof Error ? error.message : undefined);
+      }
+      if (resourceName !== undefined && (httpStatus(error) === 404 || httpStatus(error) === 410)) {
+        throw new GoogleContactNotFoundError(resourceName);
+      }
+      throw error;
+    }
+  }
+
+  async function fetchPerson(resourceName: string): Promise<people_v1.Schema$Person> {
+    return (await guarded((people) => people.people.get({ resourceName, personFields: PERSON_FIELDS }), resourceName)).data;
+  }
+
+  return {
+    async listGroups(): Promise<GoogleContactGroupInfo[]> {
+      const response = await guarded((people) => people.contactGroups.list({ pageSize: 200 }));
+      return (response.data.contactGroups ?? []).flatMap((group) =>
+        group.groupType === 'USER_CONTACT_GROUP' && group.resourceName
+          ? [{ resourceName: group.resourceName, name: group.name ?? group.resourceName }]
+          : [],
+      );
+    },
+    async listChanges(syncToken): Promise<GoogleContactChanges> {
+      const contacts: GoogleContact[] = [];
+      const deletedResourceNames: string[] = [];
+      let nextSyncToken: string | undefined;
+      let pageToken: string | undefined;
+      try {
+        do {
+          const response = await guarded((people) =>
+            people.people.connections.list({
+              resourceName: 'people/me',
+              personFields: `${PERSON_FIELDS},metadata`,
+              pageSize: 1000,
+              requestSyncToken: true,
+              pageToken,
+              ...(syncToken ? { syncToken } : {}),
+            }),
+          );
+          for (const person of response.data.connections ?? []) {
+            if (person.metadata?.deleted) {
+              if (person.resourceName) {
+                deletedResourceNames.push(person.resourceName);
+              }
+            } else {
+              contacts.push(fromPerson(person));
+            }
+          }
+          nextSyncToken = response.data.nextSyncToken ?? nextSyncToken;
+          pageToken = response.data.nextPageToken ?? undefined;
+        } while (pageToken);
+      } catch (error) {
+        // People API answers an expired token with HTTP 400 (EXPIRED_SYNC_TOKEN) or 410
+        const expired = syncToken && (httpStatus(error) === 410 || (error instanceof Error && error.message.includes('EXPIRED_SYNC_TOKEN')));
+        if (expired) {
+          throw new GoogleSyncTokenExpiredError();
+        }
+        throw error;
+      }
+      if (!nextSyncToken) {
+        throw new Error('Google did not return a sync token');
+      }
+      return { contacts, deletedResourceNames, nextSyncToken };
+    },
+    async create(write: GoogleContactWrite) {
+      if (!write.data) {
+        throw new Error('A new contact needs its data');
+      }
+      const body = toPerson(write.data);
+      const response = await guarded((people) =>
+        people.people.createContact({
+          personFields: PERSON_FIELDS,
+          requestBody: { ...body, memberships: write.addGroups.map(membership) },
+        }),
+      );
+      return fromPerson(response.data);
+    },
+    async update(resourceName, write) {
+      const current = await fetchPerson(resourceName);
+      const kept = (current.memberships ?? []).flatMap((m) => {
+        const name = m.contactGroupMembership?.contactGroupResourceName;
+        return name && !write.removeGroups.includes(name) ? [name] : [];
+      });
+      const groups = [...new Set([...kept, ...write.addGroups, MY_CONTACTS])];
+      const fields = write.data ? Object.keys(toPerson(write.data)) : [];
+      const response = await guarded(
+        (people) =>
+          people.people.updateContact({
+            resourceName,
+            personFields: PERSON_FIELDS,
+            updatePersonFields: [...fields, 'memberships'].join(','),
+            requestBody: {
+              etag: current.etag,
+              ...(write.data ? toPerson(write.data) : {}),
+              memberships: groups.map(membership),
+            },
+          }),
+        resourceName,
+      );
+      return fromPerson(response.data);
+    },
+    async delete(resourceName) {
+      await guarded((people) => people.people.deleteContact({ resourceName }), resourceName);
+    },
+    async updatePhoto(resourceName, photo) {
+      await guarded(
+        (people) =>
+          people.people.updateContactPhoto({
+            resourceName,
+            requestBody: { photoBytes: photo.toString('base64'), personFields: 'photos' },
+          }),
+        resourceName,
+      );
+    },
+  };
+}
