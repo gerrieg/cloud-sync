@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { readOAuthRedirect } from '../lib/oauth-redirect.js';
 import { useProfiles } from '../lib/use-profiles.js';
 import { AppleConnection } from './AppleConnection.js';
+import { CalendarSyncPanel } from './CalendarSyncPanel.js';
 import { GoogleConnection } from './GoogleConnection.js';
 import { ProfileSettingsPanel } from './ProfileSettingsPanel.js';
 import { ProfileSwitcher } from './ProfileSwitcher.js';
@@ -83,6 +84,7 @@ export function AppShell({ username, onLogout }: AppShellProps) {
               profile={selected}
               outcome={selected.id === oauthRedirect.profileId ? oauthRedirect.outcome : null}
             />
+            <CalendarSyncPanel profile={selected} />
             <TriggerTokenPanel profile={selected} />
           </>
         )}

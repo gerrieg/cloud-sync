@@ -1,4 +1,5 @@
 import type { AppleConnectionReport, ProtocolCheckResult } from '../../src/shared/profile.js';
+import { FakeCalendarWorld } from './fake-calendars.js';
 import {
   GoogleAuthError,
   type GoogleTokens,
@@ -22,6 +23,9 @@ export class FakeSyncProviders {
   private readonly appleAccounts = new Map<string, FakeAppleAccount>();
   private readonly googleCodes = new Map<string, GoogleTokens>();
   private readonly invalidGrantCodes = new Set<string>();
+
+  /** Stateful Apple CalDAV + Google Calendar behind the calendar calls. */
+  readonly calendars = new FakeCalendarWorld();
 
   /** Every context the app instantiated providers with (decrypted, as the adapters would see it). */
   readonly contexts: SyncProvidersContext[] = [];
@@ -62,8 +66,10 @@ export class FakeSyncProviders {
           };
           return { caldav: check('caldav'), carddav: check('carddav'), imap: check('imap') };
         },
+        calendars: this.calendars.appleCalendarsFor(context.apple?.appleId ?? null),
       },
       google: {
+        calendars: this.calendars.googleCalendarsFor(context.googleTokens?.refresh_token ?? null),
         buildAuthUrl: ({ redirectUri, state }) =>
           `https://accounts.google.test/auth?${new URLSearchParams({
             redirect_uri: redirectUri,

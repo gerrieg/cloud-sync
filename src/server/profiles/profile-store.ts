@@ -56,6 +56,8 @@ export type ProfileRowPatch = Partial<
     | 'googleTokensEnc'
     | 'googleReauthRequired'
     | 'triggerTokenEnc'
+    | 'lastSyncAt'
+    | 'lastSyncStatus'
   >
 >;
 

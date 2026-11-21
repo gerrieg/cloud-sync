@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import type { AppleTestReport } from '../../shared/profile.js';
-import type { AppVariables } from '../app.js';
 import { createOAuthState } from '../auth/oauth-state.js';
 import type { Clock } from '../clock.js';
 import type { AppConfig } from '../config.js';
@@ -17,20 +16,19 @@ import {
   toProfileDto,
   toProvidersContext,
   updateProfile,
-  type ProfileRow,
   type ProfileRowPatch,
 } from '../profiles/profile-store.js';
 import type { SyncProvidersFactory } from '../providers/types.js';
+import type { ProfileLocks } from '../sync/profile-locks.js';
+import { createCalendarRoutes } from './calendar-sync.js';
+import type { ProfileEnv } from './profile-context.js';
 
 export interface ProfileRouteDeps {
   readonly config: AppConfig;
   readonly db: AppDatabase;
   readonly clock: Clock;
+  readonly locks: ProfileLocks;
   readonly createSyncProviders: SyncProvidersFactory;
-}
-
-interface ProfileEnv {
-  Variables: AppVariables & { profile: ProfileRow };
 }
 
 const MAX_NAME_LENGTH = 100;
@@ -44,7 +42,7 @@ function parseName(value: unknown): string | null {
 }
 
 export function createProfileRoutes(deps: ProfileRouteDeps): Hono<ProfileEnv> {
-  const { config, db, clock, createSyncProviders } = deps;
+  const { config, db, clock, locks, createSyncProviders } = deps;
   const routes = new Hono<ProfileEnv>();
 
   // Every `/:id` route works on an existing Profile: resolve it once, answer 404 otherwise.
@@ -58,6 +56,7 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<ProfileEnv> {
   });
   routes.use('/:id', loadProfile);
   routes.use('/:id/*', loadProfile);
+  routes.route('/', createCalendarRoutes({ config, db, clock, locks, createSyncProviders }));
 
   routes.get('/', (c) => c.json(listProfiles(db).map(toProfileDto), 200));
 

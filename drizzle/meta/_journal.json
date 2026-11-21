@@ -15,6 +15,13 @@
       "when": 1795279894152,
       "tag": "0001_military_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795281034449,
+      "tag": "0002_new_swarm",
+      "breakpoints": true
     }
   ]
 }

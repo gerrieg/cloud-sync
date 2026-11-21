@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { ImapFlow } from 'imapflow';
 import { createDAVClient } from 'tsdav';
 import type { AppleConnectionReport, ProtocolCheckResult } from '../../shared/profile.js';
+import { createRealAppleCalendars, createRealGoogleCalendars } from './real-calendar.js';
 import {
   GOOGLE_INVALID_GRANT,
   GoogleAuthError,
@@ -124,8 +125,10 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
         ]);
         return { caldav, carddav, imap };
       },
+      calendars: createRealAppleCalendars(context.apple),
     },
     google: {
+      calendars: createRealGoogleCalendars(config, context.googleTokens),
       buildAuthUrl({ redirectUri, state }) {
         return createOAuthClient(config, redirectUri).generateAuthUrl({
           access_type: 'offline',

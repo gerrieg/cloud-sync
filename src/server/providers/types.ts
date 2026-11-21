@@ -1,4 +1,12 @@
 import type { AppleConnectionReport } from '../../shared/profile.js';
+import type {
+  AppleCalendarInfo,
+  AppleCalendarObject,
+  GoogleCalendarInfo,
+  GoogleEvent,
+  GoogleEventDraft,
+  GoogleWriteOptions,
+} from './calendar-types.js';
 
 export interface AppleCredentials {
   readonly appleId: string;
@@ -32,6 +40,11 @@ export interface SyncProviders {
   readonly apple: {
     /** Checks CalDAV, CardDAV and IMAP simultaneously; never throws for per-protocol failures. */
     testConnection(): Promise<AppleConnectionReport>;
+    readonly calendars: {
+      list(): Promise<AppleCalendarInfo[]>;
+      /** All events of one calendar with their ETags. */
+      listObjects(calendarUrl: string): Promise<AppleCalendarObject[]>;
+    };
   };
   readonly google: {
     buildAuthUrl(input: { readonly redirectUri: string; readonly state: string }): string;
@@ -40,6 +53,26 @@ export interface SyncProviders {
       readonly code: string;
       readonly redirectUri: string;
     }): Promise<GoogleTokens>;
+    /** Calendar calls throw GoogleAuthError (`invalid_grant`) when the stored authorization is dead. */
+    readonly calendars: {
+      list(): Promise<GoogleCalendarInfo[]>;
+      listEvents(calendarId: string): Promise<GoogleEvent[]>;
+      /** With `recurringEventId` + `originalStartTime` this overrides that occurrence of the series. */
+      insertEvent(
+        calendarId: string,
+        draft: GoogleEventDraft,
+        options: GoogleWriteOptions,
+      ): Promise<GoogleEvent>;
+      /** Throws GoogleEventNotFoundError if the event no longer exists. */
+      updateEvent(
+        calendarId: string,
+        eventId: string,
+        draft: GoogleEventDraft,
+        options: GoogleWriteOptions,
+      ): Promise<GoogleEvent>;
+      /** Throws GoogleEventNotFoundError if the event no longer exists. */
+      deleteEvent(calendarId: string, eventId: string, options: GoogleWriteOptions): Promise<void>;
+    };
   };
 }
 

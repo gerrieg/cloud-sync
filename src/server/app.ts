@@ -3,6 +3,7 @@ import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { ProfileLocks } from './sync/profile-locks.js';
 import { UsedOAuthStates } from './auth/oauth-state.js';
 import { decideAccess } from './auth/access.js';
 import { SESSION_COOKIE_NAME, unsealSession, type SessionPayload } from './auth/session.js';
@@ -31,6 +32,7 @@ export interface CreateAppOptions {
 export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVariables }> {
   const { config, dbContext, staticDir } = options;
   const clock = options.clock ?? systemClock;
+  const locks = new ProfileLocks();
   const createSyncProviders =
     options.createSyncProviders ??
     createRealSyncProviders({
@@ -65,7 +67,7 @@ export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.route('/api/health', createHealthRoutes(dbContext.sqlite));
   app.route(
     '/api/profiles',
-    createProfileRoutes({ config, db: dbContext.db, clock, createSyncProviders }),
+    createProfileRoutes({ config, db: dbContext.db, clock, locks, createSyncProviders }),
   );
   app.route(
     '/api/auth/google',
