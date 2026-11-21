@@ -1,3 +1,5 @@
+import type { AppleConnectionReport } from '../../shared/profile.js';
+
 export interface AppleCredentials {
   readonly appleId: string;
   readonly appPassword: string;
@@ -10,16 +12,6 @@ export interface GoogleTokens {
   readonly scope?: string;
 }
 
-export type ProtocolCheckResult =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly error: string };
-
-export interface AppleConnectionReport {
-  readonly caldav: ProtocolCheckResult;
-  readonly carddav: ProtocolCheckResult;
-  readonly imap: ProtocolCheckResult;
-}
-
 export const GOOGLE_INVALID_GRANT = 'invalid_grant';
 
 export class GoogleAuthError extends Error {
@@ -29,10 +21,6 @@ export class GoogleAuthError extends Error {
     super(message ?? code);
     this.name = 'GoogleAuthError';
     this.code = code;
-  }
-
-  get isInvalidGrant(): boolean {
-    return this.code === GOOGLE_INVALID_GRANT;
   }
 }
 

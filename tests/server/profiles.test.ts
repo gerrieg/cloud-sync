@@ -422,6 +422,34 @@ describe('Profile management HTTP seam', () => {
       });
     });
 
+    it('accepts each OAuth state only once, even when the first attempt failed', async () => {
+      await setup();
+      const anna = await createProfile('Anna');
+      ctx!.providers.issueGoogleCode('code-1', TOKENS);
+      ctx!.providers.issueGoogleCode('code-2', { ...TOKENS, refresh_token: 'other-refresh' });
+      const { state } = await startLinking(anna);
+
+      expect((await callback({ code: 'code-1', state })).status).toBe(302);
+      expect((await callback({ code: 'code-2', state })).status).toBe(400);
+
+      ctx!.providers.rejectGoogleCodeWithInvalidGrant('stale');
+      const failing = await startLinking(anna);
+      expect((await callback({ code: 'stale', state: failing.state })).status).toBe(302);
+      expect((await callback({ code: 'code-2', state: failing.state })).status).toBe(400);
+    });
+
+    it('keeps a path prefix from PUBLIC_BASE_URL in the callback URL', async () => {
+      ctx = createTestContext({
+        envOverrides: { PUBLIC_BASE_URL: 'https://example.com/cloud-sync/' },
+      });
+      cookie = await ctx.signIn();
+      const anna = await createProfile('Anna');
+
+      expect((await startLinking(anna)).redirectUri).toBe(
+        'https://example.com/cloud-sync/api/auth/google/callback',
+      );
+    });
+
     it('redirects with an error when the user denies access', async () => {
       await setup();
       const anna = await createProfile('Anna');

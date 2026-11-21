@@ -1,12 +1,11 @@
 import { google } from 'googleapis';
 import { ImapFlow } from 'imapflow';
 import { createDAVClient } from 'tsdav';
+import type { AppleConnectionReport, ProtocolCheckResult } from '../../shared/profile.js';
 import {
   GOOGLE_INVALID_GRANT,
   GoogleAuthError,
-  type AppleConnectionReport,
   type AppleCredentials,
-  type ProtocolCheckResult,
   type SyncProviders,
   type SyncProvidersFactory,
 } from './types.js';
@@ -32,13 +31,20 @@ function describeError(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Unknown error';
 }
 
-async function runCheck(check: () => Promise<void>): Promise<ProtocolCheckResult> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('Timed out')), CHECK_TIMEOUT_MS);
+/**
+ * Runs one connectivity check with a deadline. On timeout the signal aborts the underlying
+ * request/socket instead of letting it linger in the background.
+ */
+async function runCheck(
+  check: (signal: AbortSignal) => Promise<void>,
+): Promise<ProtocolCheckResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
+  const timedOut = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener('abort', () => reject(new Error('Timed out')), { once: true });
   });
   try {
-    await Promise.race([check(), timeout]);
+    await Promise.race([check(controller.signal), timedOut]);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: describeError(error) };
@@ -51,12 +57,14 @@ async function checkDav(
   serverUrl: string,
   accountType: 'caldav' | 'carddav',
   credentials: AppleCredentials,
+  signal: AbortSignal,
 ): Promise<void> {
   const client = await createDAVClient({
     serverUrl,
     credentials: { username: credentials.appleId, password: credentials.appPassword },
     authMethod: 'Basic',
     defaultAccountType: accountType,
+    fetchOptions: { signal },
   });
   if (accountType === 'caldav') {
     await client.fetchCalendars();
@@ -65,7 +73,7 @@ async function checkDav(
   }
 }
 
-async function checkImap(credentials: AppleCredentials): Promise<void> {
+async function checkImap(credentials: AppleCredentials, signal: AbortSignal): Promise<void> {
   const client = new ImapFlow({
     host: ICLOUD_IMAP_HOST,
     port: ICLOUD_IMAP_PORT,
@@ -75,10 +83,13 @@ async function checkImap(credentials: AppleCredentials): Promise<void> {
   });
   // imapflow emits connection errors; without a listener they would crash the process
   client.on('error', () => undefined);
+  signal.addEventListener('abort', () => client.close(), { once: true });
   try {
     await client.connect();
-  } finally {
+    await client.logout();
+  } catch (error) {
     client.close();
+    throw error;
   }
 }
 
@@ -93,6 +104,10 @@ function isInvalidGrant(error: unknown): boolean {
   );
 }
 
+function createOAuthClient(config: RealProvidersConfig, redirectUri: string) {
+  return new google.auth.OAuth2(config.googleClientId, config.googleClientSecret, redirectUri);
+}
+
 export function createRealSyncProviders(config: RealProvidersConfig): SyncProvidersFactory {
   return (context): SyncProviders => ({
     apple: {
@@ -103,21 +118,16 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
           return { caldav: missing, carddav: missing, imap: missing };
         }
         const [caldav, carddav, imap] = await Promise.all([
-          runCheck(() => checkDav(ICLOUD_CALDAV_URL, 'caldav', credentials)),
-          runCheck(() => checkDav(ICLOUD_CARDDAV_URL, 'carddav', credentials)),
-          runCheck(() => checkImap(credentials)),
+          runCheck((signal) => checkDav(ICLOUD_CALDAV_URL, 'caldav', credentials, signal)),
+          runCheck((signal) => checkDav(ICLOUD_CARDDAV_URL, 'carddav', credentials, signal)),
+          runCheck((signal) => checkImap(credentials, signal)),
         ]);
         return { caldav, carddav, imap };
       },
     },
     google: {
       buildAuthUrl({ redirectUri, state }) {
-        const client = new google.auth.OAuth2(
-          config.googleClientId,
-          config.googleClientSecret,
-          redirectUri,
-        );
-        return client.generateAuthUrl({
+        return createOAuthClient(config, redirectUri).generateAuthUrl({
           access_type: 'offline',
           prompt: 'consent',
           include_granted_scopes: true,
@@ -126,13 +136,8 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
         });
       },
       async exchangeCode({ code, redirectUri }) {
-        const client = new google.auth.OAuth2(
-          config.googleClientId,
-          config.googleClientSecret,
-          redirectUri,
-        );
         try {
-          const { tokens } = await client.getToken(code);
+          const { tokens } = await createOAuthClient(config, redirectUri).getToken(code);
           if (!tokens.refresh_token) {
             throw new GoogleAuthError('missing_refresh_token', 'Google returned no refresh token');
           }

@@ -1,30 +1,19 @@
-import { useState } from 'react';
+import type { GoogleLinkOutcome } from '../../shared/profile.js';
 import { redirectTo } from '../lib/navigation.js';
 import { getGoogleAuthUrl, type Profile } from '../lib/profiles-api.js';
-
-export type GoogleFlash = 'connected' | 'invalid_grant' | 'error' | null;
+import { secondaryButtonClass } from '../lib/styles.js';
+import { useAsyncAction } from '../lib/use-async-action.js';
 
 interface GoogleConnectionProps {
   profile: Profile;
-  flash: GoogleFlash;
+  /** Outcome of the OAuth redirect that brought the admin back to this Profile, if any. */
+  outcome: GoogleLinkOutcome | null;
 }
 
-export function GoogleConnection({ profile, flash }: GoogleConnectionProps) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function GoogleConnection({ profile, outcome }: GoogleConnectionProps) {
+  const { busy, error, run } = useAsyncAction();
 
-  const needsReauth = profile.googleReauthRequired || flash === 'invalid_grant';
-
-  async function handleConnect() {
-    setBusy(true);
-    setError(null);
-    try {
-      redirectTo(await getGoogleAuthUrl(profile.id));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not start Google sign-in');
-      setBusy(false);
-    }
-  }
+  const needsReauth = profile.googleReauthRequired || outcome === 'invalid_grant';
 
   return (
     <section className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
@@ -36,12 +25,12 @@ export function GoogleConnection({ profile, flash }: GoogleConnectionProps) {
           so syncing can resume.
         </p>
       )}
-      {flash === 'error' && (
+      {outcome === 'error' && (
         <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
           Could not connect Google. Authorization was denied or failed; please try again.
         </p>
       )}
-      {flash === 'connected' && (
+      {outcome === 'connected' && (
         <p role="status" className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">
           Google account connected.
         </p>
@@ -54,8 +43,10 @@ export function GoogleConnection({ profile, flash }: GoogleConnectionProps) {
       <button
         type="button"
         disabled={busy}
-        onClick={() => void handleConnect()}
-        className="mt-4 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        onClick={() =>
+          void run(async () => redirectTo(await getGoogleAuthUrl(profile.id)), 'Could not start Google sign-in')
+        }
+        className={`mt-4 ${secondaryButtonClass}`}
       >
         {profile.googleConnected || needsReauth ? 'Reconnect Google' : 'Connect Google'}
       </button>

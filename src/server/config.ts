@@ -128,7 +128,7 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new Error('unsupported protocol');
       }
-      publicBaseUrl = parsed.origin;
+      publicBaseUrl = `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
     } catch {
       issues.push('PUBLIC_BASE_URL must be an http(s) URL such as https://sync.example.com');
     }

@@ -1,4 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { secondaryButtonClass } from '../lib/styles.js';
+import { useAsyncAction } from '../lib/use-async-action.js';
 import {
   testAppleConnection,
   updateProfile,
@@ -11,9 +13,6 @@ interface AppleConnectionProps {
   onChange(profile: Profile): void;
 }
 
-const buttonClass =
-  'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50';
-
 const PROTOCOLS = [
   ['caldav', 'CalDAV'],
   ['carddav', 'CardDAV'],
@@ -23,28 +22,15 @@ const PROTOCOLS = [
 export function AppleConnection({ profile, onChange }: AppleConnectionProps) {
   const [appleId, setAppleId] = useState('');
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<AppleTestReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run, reset } = useAsyncAction();
 
   useEffect(() => {
     setAppleId('');
     setPassword('');
     setReport(null);
-    setError(null);
-  }, [profile.id]);
-
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Request failed');
-    } finally {
-      setBusy(false);
-    }
-  }
+    reset();
+  }, [profile.id, reset]);
 
   function handleSave(event: FormEvent) {
     event.preventDefault();
@@ -91,13 +77,17 @@ export function AppleConnection({ profile, onChange }: AppleConnectionProps) {
             className="mt-1 block w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
           />
         </label>
-        <button type="submit" disabled={busy || !appleId.trim() || !password} className={buttonClass}>
+        <button
+          type="submit"
+          disabled={busy || !appleId.trim() || !password}
+          className={secondaryButtonClass}
+        >
           Save Apple credentials
         </button>
         <button
           type="button"
           disabled={busy || !profile.appleConnected}
-          className={buttonClass}
+          className={secondaryButtonClass}
           onClick={() => void run(async () => setReport(await testAppleConnection(profile.id)))}
         >
           Test connection

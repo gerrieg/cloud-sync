@@ -1,21 +1,6 @@
-export interface Profile {
-  readonly id: string;
-  readonly name: string;
-  readonly enabled: boolean;
-  readonly appleId: string | null;
-  readonly appleConnected: boolean;
-  readonly googleConnected: boolean;
-  readonly googleReauthRequired: boolean;
-  readonly lastSyncAt: number | null;
-  readonly lastSyncStatus: string | null;
-}
+import type { AppleTestReport, ProfileDto, ProfileUpdate } from '../../shared/profile.js';
 
-export type ProfilePatch = Partial<{
-  name: string;
-  enabled: boolean;
-  appleId: string;
-  appleAppPassword: string;
-}>;
+export type { AppleTestReport, ProfileDto as Profile, ProfileUpdate };
 
 async function request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const response = await fetch(path, {
@@ -38,29 +23,20 @@ async function request<T>(path: string, init?: { method?: string; body?: unknown
   return data as T;
 }
 
-export function listProfiles(): Promise<Profile[]> {
+export function listProfiles(): Promise<ProfileDto[]> {
   return request('/api/profiles');
 }
 
-export function createProfile(name: string): Promise<Profile> {
+export function createProfile(name: string): Promise<ProfileDto> {
   return request('/api/profiles', { method: 'POST', body: { name } });
 }
 
-export function updateProfile(id: string, patch: ProfilePatch): Promise<Profile> {
+export function updateProfile(id: string, patch: ProfileUpdate): Promise<ProfileDto> {
   return request(`/api/profiles/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
 }
 
 export function deleteProfile(id: string): Promise<void> {
   return request(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
-}
-
-export type ProtocolResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
-
-export interface AppleTestReport {
-  readonly ok: boolean;
-  readonly caldav: ProtocolResult;
-  readonly carddav: ProtocolResult;
-  readonly imap: ProtocolResult;
 }
 
 export function testAppleConnection(id: string): Promise<AppleTestReport> {

@@ -42,7 +42,7 @@ export function createOAuthState(input: {
 export function verifyOAuthState(
   state: string | undefined,
   input: { sessionIat: number; sessionSecret: string; clock: Clock },
-): { profileId: string } | null {
+): { profileId: string; nonce: string; exp: number } | null {
   const parts = state?.split('.') ?? [];
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
     return null;
@@ -64,8 +64,33 @@ export function verifyOAuthState(
     ) {
       return null;
     }
-    return { profileId: payload.profileId };
+    if (typeof payload.nonce !== 'string') {
+      return null;
+    }
+    return { profileId: payload.profileId, nonce: payload.nonce, exp: payload.exp };
   } catch {
     return null;
+  }
+}
+
+/** Remembers consumed OAuth states until they expire so each one can be redeemed only once. */
+export class UsedOAuthStates {
+  private readonly used = new Map<string, number>();
+
+  constructor(private readonly clock: Clock) {}
+
+  /** Returns false when the nonce was already consumed. */
+  consume(nonce: string, exp: number): boolean {
+    const now = this.clock.now();
+    for (const [knownNonce, knownExp] of this.used) {
+      if (knownExp <= now) {
+        this.used.delete(knownNonce);
+      }
+    }
+    if (this.used.has(nonce)) {
+      return false;
+    }
+    this.used.set(nonce, exp);
+    return true;
   }
 }

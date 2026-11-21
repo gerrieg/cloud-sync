@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useAsyncAction } from '../lib/use-async-action.js';
 import type { Profile } from '../lib/profiles-api.js';
 
 interface ProfileSwitcherProps {
@@ -10,25 +11,18 @@ interface ProfileSwitcherProps {
 
 export function ProfileSwitcher({ profiles, selectedId, onSelect, onCreate }: ProfileSwitcherProps) {
   const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAsyncAction();
 
-  async function handleSubmit(event: FormEvent) {
+  function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const name = newName.trim();
     if (!name) {
       return;
     }
-    setCreating(true);
-    setError(null);
-    try {
+    void run(async () => {
       await onCreate(name);
       setNewName('');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not create Profile');
-    } finally {
-      setCreating(false);
-    }
+    }, 'Could not create Profile');
   }
 
   return (
@@ -58,7 +52,7 @@ export function ProfileSwitcher({ profiles, selectedId, onSelect, onCreate }: Pr
         />
         <button
           type="submit"
-          disabled={creating || !newName.trim()}
+          disabled={busy || !newName.trim()}
           className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
           Add Profile

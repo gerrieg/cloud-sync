@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
+import type { AppleTestReport } from '../../shared/profile.js';
 import type { AppVariables } from '../app.js';
 import { createOAuthState } from '../auth/oauth-state.js';
 import type { Clock } from '../clock.js';
 import type { AppConfig } from '../config.js';
 import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
 import type { AppDatabase } from '../db/index.js';
-import { resolveGoogleRedirectUri } from './google-oauth.js';
-import type { SyncProvidersFactory } from '../providers/types.js';
+import { resolveGoogleRedirectUri } from '../profiles/google-redirect.js';
 import {
   deleteProfile,
   findProfile,
@@ -16,14 +17,20 @@ import {
   toProfileDto,
   toProvidersContext,
   updateProfile,
-  type ProfilePatch,
+  type ProfileRow,
+  type ProfileRowPatch,
 } from '../profiles/profile-store.js';
+import type { SyncProvidersFactory } from '../providers/types.js';
 
 export interface ProfileRouteDeps {
   readonly config: AppConfig;
   readonly db: AppDatabase;
   readonly clock: Clock;
   readonly createSyncProviders: SyncProvidersFactory;
+}
+
+interface ProfileEnv {
+  Variables: AppVariables & { profile: ProfileRow };
 }
 
 const MAX_NAME_LENGTH = 100;
@@ -36,9 +43,21 @@ function parseName(value: unknown): string | null {
   return name.length > 0 && name.length <= MAX_NAME_LENGTH ? name : null;
 }
 
-export function createProfileRoutes(deps: ProfileRouteDeps): Hono<{ Variables: AppVariables }> {
+export function createProfileRoutes(deps: ProfileRouteDeps): Hono<ProfileEnv> {
   const { config, db, clock, createSyncProviders } = deps;
-  const routes = new Hono<{ Variables: AppVariables }>();
+  const routes = new Hono<ProfileEnv>();
+
+  // Every `/:id` route works on an existing Profile: resolve it once, answer 404 otherwise.
+  const loadProfile = createMiddleware<ProfileEnv>(async (c, next) => {
+    const row = findProfile(db, c.req.param('id') ?? '');
+    if (!row) {
+      return c.json({ error: 'Profile not found' }, 404);
+    }
+    c.set('profile', row);
+    await next();
+  });
+  routes.use('/:id', loadProfile);
+  routes.use('/:id/*', loadProfile);
 
   routes.get('/', (c) => c.json(listProfiles(db).map(toProfileDto), 200));
 
@@ -51,17 +70,9 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<{ Variables: A
     return c.json(toProfileDto(insertProfile(db, name, config.encryptionKey)), 201);
   });
 
-  routes.get('/:id', (c) => {
-    const row = findProfile(db, c.req.param('id'));
-    return row ? c.json(toProfileDto(row), 200) : c.json({ error: 'Profile not found' }, 404);
-  });
+  routes.get('/:id', (c) => c.json(toProfileDto(c.get('profile')), 200));
 
   routes.patch('/:id', async (c) => {
-    const id = c.req.param('id');
-    if (!findProfile(db, id)) {
-      return c.json({ error: 'Profile not found' }, 404);
-    }
-
     const body = (await c.req.json().catch(() => null)) as {
       name?: unknown;
       enabled?: unknown;
@@ -72,7 +83,7 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<{ Variables: A
       return c.json({ error: 'Invalid request body' }, 400);
     }
 
-    const patch: ProfilePatch = {};
+    const patch: ProfileRowPatch = {};
     if (body.name !== undefined) {
       const name = parseName(body.name);
       if (!name) {
@@ -96,38 +107,33 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<{ Variables: A
       patch.appleAppPasswordEnc = encryptSecret(appPassword, config.encryptionKey);
     }
 
-    const updated = updateProfile(db, id, patch);
-    return updated ? c.json(toProfileDto(updated), 200) : c.json({ error: 'Profile not found' }, 404);
+    return c.json(toProfileDto(updateProfile(db, c.get('profile').id, patch)), 200);
   });
 
-  routes.delete('/:id', (c) =>
-    deleteProfile(db, c.req.param('id'))
-      ? c.body(null, 204)
-      : c.json({ error: 'Profile not found' }, 404),
-  );
+  routes.delete('/:id', (c) => {
+    deleteProfile(db, c.get('profile').id);
+    return c.body(null, 204);
+  });
 
   routes.post('/:id/test-apple', async (c) => {
-    const row = findProfile(db, c.req.param('id'));
-    if (!row) {
-      return c.json({ error: 'Profile not found' }, 404);
-    }
-    const context = toProvidersContext(row, config.encryptionKey);
+    const context = toProvidersContext(c.get('profile'), config.encryptionKey);
     if (!context.apple) {
       return c.json({ error: 'No Apple credentials configured for this Profile' }, 409);
     }
     const report = await createSyncProviders(context).apple.testConnection();
-    return c.json(
-      { ok: report.caldav.ok && report.carddav.ok && report.imap.ok, ...report },
-      200,
-    );
+    const body: AppleTestReport = {
+      ok: report.caldav.ok && report.carddav.ok && report.imap.ok,
+      ...report,
+    };
+    return c.json(body, 200);
   });
 
   routes.get('/:id/google/auth-url', (c) => {
-    const row = findProfile(db, c.req.param('id'));
     const session = c.get('session');
-    if (!row || !session) {
-      return c.json({ error: 'Profile not found' }, 404);
+    if (!session) {
+      return c.json({ error: 'Unauthorized' }, 401);
     }
+    const row = c.get('profile');
     const state = createOAuthState({
       profileId: row.id,
       sessionIat: session.iat,
@@ -141,21 +147,16 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<{ Variables: A
     return c.json({ url }, 200);
   });
 
-  routes.get('/:id/trigger-token', (c) => {
-    const row = findProfile(db, c.req.param('id'));
-    if (!row) {
-      return c.json({ error: 'Profile not found' }, 404);
-    }
-    return c.json({ token: decryptSecret(row.triggerTokenEnc, config.encryptionKey) }, 200);
-  });
+  routes.get('/:id/trigger-token', (c) =>
+    c.json({ token: decryptSecret(c.get('profile').triggerTokenEnc, config.encryptionKey) }, 200),
+  );
 
   routes.post('/:id/rotate-trigger-token', (c) => {
-    const id = c.req.param('id');
     const token = generateTriggerToken();
-    const updated = updateProfile(db, id, {
+    updateProfile(db, c.get('profile').id, {
       triggerTokenEnc: encryptSecret(token, config.encryptionKey),
     });
-    return updated ? c.json({ token }, 200) : c.json({ error: 'Profile not found' }, 404);
+    return c.json({ token }, 200);
   });
 
   return routes;

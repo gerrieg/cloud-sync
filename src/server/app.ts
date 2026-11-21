@@ -3,6 +3,7 @@ import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { UsedOAuthStates } from './auth/oauth-state.js';
 import { decideAccess } from './auth/access.js';
 import { SESSION_COOKIE_NAME, unsealSession, type SessionPayload } from './auth/session.js';
 import { systemClock, type Clock } from './clock.js';
@@ -68,7 +69,13 @@ export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVaria
   );
   app.route(
     '/api/auth/google',
-    createGoogleOAuthRoutes({ config, db: dbContext.db, clock, createSyncProviders }),
+    createGoogleOAuthRoutes({
+      config,
+      db: dbContext.db,
+      clock,
+      usedStates: new UsedOAuthStates(clock),
+      createSyncProviders,
+    }),
   );
   app.route(
     '/api/auth',

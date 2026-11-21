@@ -1,38 +1,25 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { secondaryButtonClass } from '../lib/styles.js';
+import { useAsyncAction } from '../lib/use-async-action.js';
 import { deleteProfile, updateProfile, type Profile } from '../lib/profiles-api.js';
 
-interface ProfilePanelProps {
+interface ProfileSettingsPanelProps {
   profile: Profile;
   onChange(profile: Profile): void;
   onDeleted(id: string): void;
 }
 
-const buttonClass =
-  'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50';
-
-export function ProfilePanel({ profile, onChange, onDeleted }: ProfilePanelProps) {
+/** Name, paused/active state and deletion of the selected Profile. */
+export function ProfileSettingsPanel({ profile, onChange, onDeleted }: ProfileSettingsPanelProps) {
   const [name, setName] = useState(profile.name);
-  const [busy, setBusy] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run, reset } = useAsyncAction();
 
   useEffect(() => {
     setName(profile.name);
     setConfirmingDelete(false);
-    setError(null);
-  }, [profile.id, profile.name]);
-
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Request failed');
-    } finally {
-      setBusy(false);
-    }
-  }
+    reset();
+  }, [profile.id, profile.name, reset]);
 
   function handleRename(event: FormEvent) {
     event.preventDefault();
@@ -58,7 +45,7 @@ export function ProfilePanel({ profile, onChange, onDeleted }: ProfilePanelProps
           <button
             type="button"
             disabled={busy}
-            className={buttonClass}
+            className={secondaryButtonClass}
             onClick={() =>
               void run(async () => onChange(await updateProfile(profile.id, { enabled: !profile.enabled })))
             }
@@ -80,12 +67,16 @@ export function ProfilePanel({ profile, onChange, onDeleted }: ProfilePanelProps
               >
                 Confirm delete
               </button>
-              <button type="button" className={buttonClass} onClick={() => setConfirmingDelete(false)}>
+              <button
+                type="button"
+                className={secondaryButtonClass}
+                onClick={() => setConfirmingDelete(false)}
+              >
                 Cancel
               </button>
             </>
           ) : (
-            <button type="button" className={buttonClass} onClick={() => setConfirmingDelete(true)}>
+            <button type="button" className={secondaryButtonClass} onClick={() => setConfirmingDelete(true)}>
               Delete Profile
             </button>
           )}
@@ -102,7 +93,7 @@ export function ProfilePanel({ profile, onChange, onDeleted }: ProfilePanelProps
             className="mt-1 block w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
           />
         </label>
-        <button type="submit" disabled={busy} className={buttonClass}>
+        <button type="submit" disabled={busy} className={secondaryButtonClass}>
           Rename
         </button>
       </form>

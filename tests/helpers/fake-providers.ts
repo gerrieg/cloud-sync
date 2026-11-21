@@ -1,8 +1,7 @@
+import type { AppleConnectionReport, ProtocolCheckResult } from '../../src/shared/profile.js';
 import {
   GoogleAuthError,
-  type AppleConnectionReport,
   type GoogleTokens,
-  type ProtocolCheckResult,
   type SyncProviders,
   type SyncProvidersContext,
   type SyncProvidersFactory,

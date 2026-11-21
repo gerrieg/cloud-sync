@@ -1,14 +1,11 @@
-import { useEffect, useState } from 'react';
-import {
-  createProfile,
-  listProfiles,
-  type Profile,
-} from '../lib/profiles-api.js';
+import { useState } from 'react';
+import { readOAuthRedirect } from '../lib/oauth-redirect.js';
+import { useProfiles } from '../lib/use-profiles.js';
 import { AppleConnection } from './AppleConnection.js';
-import { AuthSetup } from './AuthSetup.js';
-import { GoogleConnection, type GoogleFlash } from './GoogleConnection.js';
-import { ProfilePanel } from './ProfilePanel.js';
+import { GoogleConnection } from './GoogleConnection.js';
+import { ProfileSettingsPanel } from './ProfileSettingsPanel.js';
 import { ProfileSwitcher } from './ProfileSwitcher.js';
+import { TriggerTokenPanel } from './TriggerTokenPanel.js';
 
 interface AppShellProps {
   username: string;
@@ -17,55 +14,11 @@ interface AppShellProps {
 
 export function AppShell({ username, onLogout }: AppShellProps) {
   const [loggingOut, setLoggingOut] = useState(false);
-  const [profiles, setProfiles] = useState<Profile[] | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   // Outcome of a Google OAuth redirect (`/?profile=<id>&google=<outcome>`), read once on load
-  const [oauthRedirect] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    const outcome = params.get('google');
-    const flash: GoogleFlash =
-      outcome === 'connected' || outcome === 'invalid_grant' || outcome === 'error' ? outcome : null;
-    return { profileId: params.get('profile'), flash };
-  });
-
-  useEffect(() => {
-    let active = true;
-    listProfiles()
-      .then((loaded) => {
-        if (!active) {
-          return;
-        }
-        setProfiles(loaded);
-        setSelectedId(loaded.find((p) => p.id === oauthRedirect.profileId)?.id ?? loaded[0]?.id ?? null);
-      })
-      .catch((cause: unknown) => {
-        if (active) {
-          setLoadError(cause instanceof Error ? cause.message : 'Could not load Profiles');
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const selected = profiles?.find((p) => p.id === selectedId) ?? null;
-
-  async function handleCreate(name: string) {
-    const created = await createProfile(name);
-    setProfiles((current) => [...(current ?? []), created]);
-    setSelectedId(created.id);
-  }
-
-  function handleChanged(updated: Profile) {
-    setProfiles((current) => (current ?? []).map((p) => (p.id === updated.id ? updated : p)));
-  }
-
-  function handleDeleted(id: string) {
-    const remaining = (profiles ?? []).filter((p) => p.id !== id);
-    setProfiles(remaining);
-    setSelectedId(remaining[0]?.id ?? null);
-  }
+  const [oauthRedirect] = useState(() => readOAuthRedirect(window.location.search));
+  const { profiles, selected, selectedId, select, loadError, create, replace, remove } = useProfiles(
+    oauthRedirect.profileId,
+  );
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -86,8 +39,8 @@ export function AppShell({ username, onLogout }: AppShellProps) {
               <ProfileSwitcher
                 profiles={profiles}
                 selectedId={selectedId}
-                onSelect={setSelectedId}
-                onCreate={handleCreate}
+                onSelect={select}
+                onCreate={create}
               />
             )}
           </div>
@@ -124,13 +77,13 @@ export function AppShell({ username, onLogout }: AppShellProps) {
         )}
         {selected && (
           <>
-            <ProfilePanel profile={selected} onChange={handleChanged} onDeleted={handleDeleted} />
-            <AppleConnection profile={selected} onChange={handleChanged} />
+            <ProfileSettingsPanel profile={selected} onChange={replace} onDeleted={remove} />
+            <AppleConnection profile={selected} onChange={replace} />
             <GoogleConnection
               profile={selected}
-              flash={selected.id === oauthRedirect.profileId ? oauthRedirect.flash : null}
+              outcome={selected.id === oauthRedirect.profileId ? oauthRedirect.outcome : null}
             />
-            <AuthSetup profile={selected} />
+            <TriggerTokenPanel profile={selected} />
           </>
         )}
       </main>

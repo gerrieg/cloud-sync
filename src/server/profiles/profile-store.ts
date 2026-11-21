@@ -3,22 +3,10 @@ import { eq, sql } from 'drizzle-orm';
 import type { AppDatabase } from '../db/index.js';
 import { profiles } from '../db/schema.js';
 import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
+import type { ProfileDto } from '../../shared/profile.js';
 import type { GoogleTokens, SyncProvidersContext } from '../providers/types.js';
 
 export type ProfileRow = typeof profiles.$inferSelect;
-
-/** API representation of a Profile. Never contains secrets or their ciphertext. */
-export interface ProfileDto {
-  readonly id: string;
-  readonly name: string;
-  readonly enabled: boolean;
-  readonly appleId: string | null;
-  readonly appleConnected: boolean;
-  readonly googleConnected: boolean;
-  readonly googleReauthRequired: boolean;
-  readonly lastSyncAt: number | null;
-  readonly lastSyncStatus: string | null;
-}
 
 export function toProfileDto(row: ProfileRow): ProfileDto {
   return {
@@ -58,7 +46,7 @@ export function insertProfile(db: AppDatabase, name: string, encryptionKey: Buff
     .get();
 }
 
-export type ProfilePatch = Partial<
+export type ProfileRowPatch = Partial<
   Pick<
     ProfileRow,
     | 'name'
@@ -71,11 +59,16 @@ export type ProfilePatch = Partial<
   >
 >;
 
-export function updateProfile(db: AppDatabase, id: string, patch: ProfilePatch): ProfileRow | undefined {
-  if (Object.keys(patch).length === 0) {
-    return findProfile(db, id);
+/** Applies a patch to an existing Profile; throws if the Profile does not exist. */
+export function updateProfile(db: AppDatabase, id: string, patch: ProfileRowPatch): ProfileRow {
+  const row =
+    Object.keys(patch).length === 0
+      ? findProfile(db, id)
+      : db.update(profiles).set(patch).where(eq(profiles.id, id)).returning().get();
+  if (!row) {
+    throw new Error(`Profile ${id} not found`);
   }
-  return db.update(profiles).set(patch).where(eq(profiles.id, id)).returning().get();
+  return row;
 }
 
 export function deleteProfile(db: AppDatabase, id: string): boolean {
