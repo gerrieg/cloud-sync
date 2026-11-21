@@ -61,6 +61,10 @@ export function installBackend(initial: ProfileFixture[], extra?: (call: Recorde
     if (method === 'GET' && /^\/api\/profiles\/[^/]+\/discover\/contact-groups$/.test(path)) {
       return json({ apple: [], google: [] });
     }
+    if (method === 'GET' && /^\/api\/profiles\/[^/]+\/rules\/mail$/.test(path)) return json([]);
+    if (method === 'GET' && /^\/api\/profiles\/[^/]+\/discover\/mail-folders$/.test(path)) {
+      return json({ folders: [] });
+    }
     if (method === 'GET' && /^\/api\/profiles\/[^/]+\/delete-approvals$/.test(path)) return json([]);
 
     if (path === '/api/auth/me') return json({ username: 'admin' });

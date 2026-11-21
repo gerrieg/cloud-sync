@@ -1,6 +1,7 @@
 import type { AppleConnectionReport, ProtocolCheckResult } from '../../src/shared/profile.js';
 import { FakeCalendarWorld } from './fake-calendars.js';
 import { FakeContactWorld } from './fake-contacts.js';
+import { FakeMailWorld } from './fake-mail.js';
 import {
   GoogleAuthError,
   type GoogleTokens,
@@ -30,6 +31,9 @@ export class FakeSyncProviders {
 
   /** Stateful iCloud address book + Google People behind the contact calls. */
   readonly contacts = new FakeContactWorld();
+
+  /** Stateful iCloud IMAP + Gmail behind the mail calls. */
+  readonly mail = new FakeMailWorld();
 
   /** Every context the app instantiated providers with (decrypted, as the adapters would see it). */
   readonly contexts: SyncProvidersContext[] = [];
@@ -72,10 +76,12 @@ export class FakeSyncProviders {
         },
         calendars: this.calendars.appleCalendarsFor(context.apple?.appleId ?? null),
         contacts: this.contacts.appleContactsFor(context.apple?.appleId ?? null),
+        mail: this.mail.appleMailFor(context.apple?.appleId ?? null),
       },
       google: {
         calendars: this.calendars.googleCalendarsFor(context.googleTokens?.refresh_token ?? null),
         contacts: this.contacts.googleContactsFor(context.googleTokens?.refresh_token ?? null),
+        mail: this.mail.googleMailFor(context.googleTokens?.refresh_token ?? null),
         buildAuthUrl: ({ redirectUri, state }) =>
           `https://accounts.google.test/auth?${new URLSearchParams({
             redirect_uri: redirectUri,

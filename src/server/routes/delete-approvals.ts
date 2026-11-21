@@ -6,6 +6,7 @@ import { findProfile } from '../profiles/profile-store.js';
 import { GoogleAuthError, type SyncProvidersFactory } from '../providers/types.js';
 import { executeCalendarDeletion, type CalendarDeletion } from '../sync/calendar-sync.js';
 import { executeContactDeletion, type ContactDeletion } from '../sync/contact-sync.js';
+import { executeMailDeletion, type MailDeletion } from '../sync/mail-sync.js';
 import {
   approvalItems,
   findApproval,
@@ -56,6 +57,10 @@ export function createDeleteApprovalRoutes(deps: DeleteApprovalRouteDeps): Hono<
           if (approval.domain === 'contacts') {
             for (const item of approvalItems<ContactDeletion>(approval)) {
               await executeContactDeletion({ db, providers }, item);
+            }
+          } else if (approval.domain === 'mail') {
+            for (const item of approvalItems<MailDeletion>(approval)) {
+              await executeMailDeletion({ db, providers }, item);
             }
           } else {
             for (const item of approvalItems<CalendarDeletion>(approval)) {

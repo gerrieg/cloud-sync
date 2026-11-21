@@ -136,15 +136,73 @@ export const contactSyncState = sqliteTable('contact_sync_state', {
   googleSyncToken: text('google_sync_token'),
 });
 
+export const mailSyncRules = sqliteTable(
+  'mail_sync_rules',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    appleFolderPath: text('apple_folder_path').notNull(),
+    appleFolderName: text('apple_folder_name').notNull(),
+    /** Target Gmail label: `INBOX`, `SENT` or the name of a custom label. */
+    googleLabel: text('google_label').notNull(),
+    /** Days of history to import; null means everything. */
+    syncWindowDays: integer('sync_window_days').default(30),
+    deleteBehavior: text('delete_behavior', { enum: ['trash', 'delete'] })
+      .notNull()
+      .default('trash'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  },
+  (table) => [uniqueIndex('mail_sync_rules_folder_idx').on(table.profileId, table.appleFolderPath)],
+);
+
+/** Emails are deduplicated profile-wide: one record per message, whatever folders it is in. */
+export const syncedEmails = sqliteTable(
+  'synced_emails',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    /** Normalized `Message-ID`, or a SHA-256 over Date + From + Subject + Size when there is none. */
+    messageIdKey: text('message_id_key').notNull(),
+    summary: text('summary').notNull(),
+    googleMessageId: text('google_message_id').notNull(),
+    /** JSON array of `{ folder, uid }`: where the message currently sits in synced iCloud folders. */
+    locations: text('locations').notNull().default('[]'),
+    /** UID in the iCloud Trash folder once the message was moved there; null otherwise. */
+    trashUid: integer('trash_uid'),
+    seen: integer('seen', { mode: 'boolean' }).notNull(),
+    flagged: integer('flagged', { mode: 'boolean' }).notNull(),
+  },
+  (table) => [uniqueIndex('synced_emails_profile_key_idx').on(table.profileId, table.messageIdKey)],
+);
+
+/** UIDVALIDITY of every mail folder seen, and how far the Trash folder has been read. */
+export const mailFolderState = sqliteTable(
+  'mail_folder_state',
+  {
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    folderPath: text('folder_path').notNull(),
+    uidValidity: integer('uid_validity').notNull(),
+    /** Highest UID already examined (used for the Trash folder only). */
+    lastUid: integer('last_uid').notNull().default(0),
+  },
+  (table) => [uniqueIndex('mail_folder_state_idx').on(table.profileId, table.folderPath)],
+);
+
 export const pendingDeleteApprovals = sqliteTable('pending_delete_approvals', {
   id: text('id').primaryKey(),
   profileId: text('profile_id')
     .notNull()
     .references(() => profiles.id, { onDelete: 'cascade' }),
-  domain: text('domain', { enum: ['calendar', 'contacts'] })
+  domain: text('domain', { enum: ['calendar', 'contacts', 'mail'] })
     .notNull()
     .default('calendar'),
-  /** The Sync Rule of a calendar batch; contact batches are profile-wide and have none. */
+  /** The Sync Rule of a calendar batch; contact and mail batches are profile-wide and have none. */
   ruleId: text('rule_id').references(() => calendarSyncRules.id, { onDelete: 'cascade' }),
   status: text('status', { enum: ['pending', 'approved', 'dismissed'] })
     .notNull()

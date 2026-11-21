@@ -4,6 +4,13 @@ import { createDAVClient } from 'tsdav';
 import type { AppleConnectionReport, ProtocolCheckResult } from '../../shared/profile.js';
 import { createRealAppleCalendars, createRealGoogleCalendars } from './real-calendar.js';
 import { createRealAppleContacts, createRealGoogleContacts } from './real-contacts.js';
+import {
+  GMAIL_IMPORT_MIN_INTERVAL_MS,
+  ICLOUD_IMAP_HOST,
+  ICLOUD_IMAP_PORT,
+  createRealAppleMail,
+  createRealGoogleMail,
+} from './real-mail.js';
 import { createRateLimiter } from './rate-limiter.js';
 import {
   GOOGLE_INVALID_GRANT,
@@ -15,8 +22,6 @@ import {
 
 const ICLOUD_CALDAV_URL = 'https://caldav.icloud.com';
 const ICLOUD_CARDDAV_URL = 'https://contacts.icloud.com';
-const ICLOUD_IMAP_HOST = 'imap.mail.me.com';
-const ICLOUD_IMAP_PORT = 993;
 const CHECK_TIMEOUT_MS = 15_000;
 
 export const GOOGLE_SCOPES = [
@@ -116,15 +121,19 @@ const PEOPLE_API_MIN_INTERVAL_MS = 1000;
 
 export function createRealSyncProviders(config: RealProvidersConfig): SyncProvidersFactory {
   // One limiter per Profile, shared by all runs, so overlapping requests still respect the quota
-  const limiters = new Map<string, ReturnType<typeof createRateLimiter>>();
-  const limiterFor = (profileId: string) => {
-    let limiter = limiters.get(profileId);
-    if (!limiter) {
-      limiter = createRateLimiter(PEOPLE_API_MIN_INTERVAL_MS);
-      limiters.set(profileId, limiter);
-    }
-    return limiter;
+  const limiterPool = (minIntervalMs: number) => {
+    const limiters = new Map<string, ReturnType<typeof createRateLimiter>>();
+    return (profileId: string) => {
+      let limiter = limiters.get(profileId);
+      if (!limiter) {
+        limiter = createRateLimiter(minIntervalMs);
+        limiters.set(profileId, limiter);
+      }
+      return limiter;
+    };
   };
+  const peopleLimiterFor = limiterPool(PEOPLE_API_MIN_INTERVAL_MS);
+  const gmailImportLimiterFor = limiterPool(GMAIL_IMPORT_MIN_INTERVAL_MS);
 
   return (context): SyncProviders => ({
     apple: {
@@ -143,10 +152,12 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
       },
       calendars: createRealAppleCalendars(context.apple),
       contacts: createRealAppleContacts(context.apple),
+      mail: createRealAppleMail(context.apple),
     },
     google: {
       calendars: createRealGoogleCalendars(config, context.googleTokens),
-      contacts: createRealGoogleContacts(config, context.googleTokens, limiterFor(context.profileId)),
+      contacts: createRealGoogleContacts(config, context.googleTokens, peopleLimiterFor(context.profileId)),
+      mail: createRealGoogleMail(config, context.googleTokens, gmailImportLimiterFor(context.profileId)),
       buildAuthUrl({ redirectUri, state }) {
         return createOAuthClient(config, redirectUri).generateAuthUrl({
           access_type: 'offline',

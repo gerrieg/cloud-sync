@@ -9,6 +9,7 @@ import { CalendarSyncPanel } from './CalendarSyncPanel.js';
 import { ContactSyncPanel } from './ContactSyncPanel.js';
 import { DeleteGuardBanner } from './DeleteGuardBanner.js';
 import { GoogleConnection } from './GoogleConnection.js';
+import { MailSyncPanel } from './MailSyncPanel.js';
 import { ProfileSettingsPanel } from './ProfileSettingsPanel.js';
 import { ProfileSwitcher } from './ProfileSwitcher.js';
 import { TriggerTokenPanel } from './TriggerTokenPanel.js';
@@ -45,6 +46,7 @@ function SelectedProfile({ profile, outcome, onChange, onDeleted }: SelectedProf
       <GoogleConnection profile={profile} outcome={outcome} />
       <CalendarSyncPanel profile={profile} onSynced={refresh} />
       <ContactSyncPanel profile={profile} onSynced={refresh} />
+      <MailSyncPanel profile={profile} onSynced={refresh} />
       <TriggerTokenPanel profile={profile} />
     </>
   );

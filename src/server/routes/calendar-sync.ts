@@ -12,6 +12,7 @@ import { GoogleAuthError, type SyncProvidersFactory } from '../providers/types.j
 import { removeTrackedGoogleEvents, runCalendarSync } from '../sync/calendar-sync.js';
 import { runContactSync } from '../sync/contact-sync.js';
 import { listPendingApprovals, toApprovalDto } from '../sync/delete-guard.js';
+import { runMailSync } from '../sync/mail-sync.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
 import {
   findRule,
@@ -88,21 +89,24 @@ export function createCalendarRoutes(deps: CalendarRouteDeps): Hono<ProfileEnv> 
           return c.json({ error: 'This Profile is paused' }, 409);
         }
         // `domain` narrows a run to one kind of data; without it everything is synced
-        const domain = body?.domain === 'calendars' || body?.domain === 'contacts' ? body.domain : 'all';
+        const domain =
+          body?.domain === 'calendars' || body?.domain === 'contacts' || body?.domain === 'mail' ? body.domain : 'all';
+        const covers = (part: 'calendars' | 'contacts' | 'mail') => domain === 'all' || domain === part;
         const force = body?.force === true;
-        const calendars =
-          domain === 'contacts'
-            ? { dryRun, rules: [] }
-            : await runCalendarSync({ db, clock, profile, appleId, providers, dryRun, force });
-        const contacts =
-          domain === 'calendars' ? null : await runContactSync({ db, clock, profile, providers, dryRun, force });
-        if (!dryRun && (domain === 'contacts' || contacts?.status === 'error')) {
+        const calendars = covers('calendars')
+          ? await runCalendarSync({ db, clock, profile, appleId, providers, dryRun, force })
+          : { dryRun, rules: [] };
+        const contacts = covers('contacts') ? await runContactSync({ db, clock, profile, providers, dryRun, force }) : null;
+        const mail = covers('mail') ? await runMailSync({ db, clock, profile, providers, dryRun, force }) : null;
+        // Calendar runs record the outcome themselves; other runs add theirs on top
+        const failed = contacts?.status === 'error' || mail?.status === 'error';
+        if (!dryRun && (domain === 'contacts' || domain === 'mail' || failed)) {
           updateProfile(db, profile.id, {
             lastSyncAt: clock.now(),
-            lastSyncStatus: contacts?.status === 'error' || profile.lastSyncStatus === 'error' ? 'error' : 'ok',
+            lastSyncStatus: failed || profile.lastSyncStatus === 'error' ? 'error' : 'ok',
           });
         }
-        return c.json({ ...calendars, ...(contacts ? { contacts } : {}) }, 200);
+        return c.json({ ...calendars, ...(contacts ? { contacts } : {}), ...(mail ? { mail } : {}) }, 200);
       },
       { exclusive: true },
     );

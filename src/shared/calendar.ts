@@ -1,5 +1,6 @@
 /** Calendar-sync contracts shared by the server API and the React client. */
 import type { ContactRunResult } from './contacts.js';
+import type { MailRunResult } from './mail.js';
 
 export interface AppleCalendarDto {
   readonly url: string;
@@ -82,4 +83,6 @@ export interface SyncRunResult {
   readonly rules: readonly RuleRunResult[];
   /** The profile-wide contact sync; absent when the Profile has no contact rules. */
   readonly contacts?: ContactRunResult;
+  /** The profile-wide mail sync; absent when the Profile has no mail rules. */
+  readonly mail?: MailRunResult;
 }

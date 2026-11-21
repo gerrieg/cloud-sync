@@ -18,6 +18,14 @@ import type {
   GoogleContactGroupInfo,
   GoogleContactWrite,
 } from './contact-types.js';
+import type {
+  AppleMailEnvelope,
+  AppleMailFolder,
+  AppleMailListing,
+  GoogleMailImport,
+  GoogleMailLabel,
+  GoogleMailModify,
+} from './mail-types.js';
 
 export interface AppleCredentials {
   readonly appleId: string;
@@ -73,6 +81,16 @@ export interface SyncProviders {
       putObject(input: AppleContactWrite): Promise<AppleObjectRef>;
       deleteObject(href: string, etag: string): Promise<void>;
     };
+    /** iCloud IMAP. Throws AppleMailFolderNotFoundError for a folder that does not exist (anymore). */
+    readonly mail: {
+      listFolders(): Promise<AppleMailFolder[]>;
+      /** UID, flags, size and internal date of every message of a folder; cheap, no headers. */
+      listFolder(path: string): Promise<AppleMailListing>;
+      /** The identifying headers of the given messages. */
+      fetchEnvelopes(path: string, uids: readonly number[]): Promise<AppleMailEnvelope[]>;
+      /** The complete RFC 822 message. */
+      fetchRaw(path: string, uid: number): Promise<Buffer>;
+    };
   };
   readonly google: {
     buildAuthUrl(input: { readonly redirectUri: string; readonly state: string }): string;
@@ -118,6 +136,21 @@ export interface SyncProviders {
       /** Throws GoogleContactNotFoundError if the contact no longer exists. */
       delete(resourceName: string): Promise<void>;
       updatePhoto(resourceName: string, photo: Buffer): Promise<void>;
+    };
+    /** Gmail. Imports are throttled to about one or two per second per Profile by the adapter. */
+    readonly mail: {
+      listLabels(): Promise<GoogleMailLabel[]>;
+      createLabel(name: string): Promise<GoogleMailLabel>;
+      /** `messages.import` with `internalDateSource: 'dateHeader'`; returns the Gmail message id. */
+      importMessage(input: GoogleMailImport): Promise<string>;
+      /** Throws GoogleMessageNotFoundError if the message no longer exists. */
+      modify(id: string, change: GoogleMailModify): Promise<void>;
+      /** Moves the message to Gmail's Trash. Throws GoogleMessageNotFoundError if it is gone. */
+      trash(id: string): Promise<void>;
+      /** Takes the message out of Gmail's Trash again. Throws GoogleMessageNotFoundError if it is gone. */
+      untrash(id: string): Promise<void>;
+      /** Permanently deletes the message. Throws GoogleMessageNotFoundError if it is gone. */
+      delete(id: string): Promise<void>;
     };
   };
 }

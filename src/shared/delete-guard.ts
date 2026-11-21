@@ -2,7 +2,7 @@
 
 export type DeleteApprovalStatus = 'pending' | 'approved' | 'dismissed';
 
-export type DeleteApprovalDomain = 'calendar' | 'contacts';
+export type DeleteApprovalDomain = 'calendar' | 'contacts' | 'mail';
 
 export interface DeleteApprovalItemDto {
   readonly uid: string;
@@ -16,9 +16,9 @@ export interface DeleteApprovalItemDto {
 export interface DeleteApprovalDto {
   readonly id: string;
   readonly domain: DeleteApprovalDomain;
-  /** The calendar Sync Rule whose run planned the deletions; null for contacts (profile-wide). */
+  /** The calendar Sync Rule whose run planned the deletions; null for contacts and mail (profile-wide). */
   readonly ruleId: string | null;
-  /** What the batch belongs to, for display: `Privat → Anna` for a calendar rule, `Contacts`. */
+  /** What the batch belongs to, for display: `Privat → Anna` for a calendar rule, `Contacts`, `Mail`. */
   readonly label: string;
   readonly status: DeleteApprovalStatus;
   readonly createdAt: number;

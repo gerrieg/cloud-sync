@@ -45,8 +45,8 @@ export function queueDeletions(
   db: AppDatabase,
   input: {
     readonly profileId: string;
-    readonly domain: 'calendar' | 'contacts';
-    /** The Sync Rule of a calendar batch; null for the profile-wide contact sync. */
+    readonly domain: 'calendar' | 'contacts' | 'mail';
+    /** The Sync Rule of a calendar batch; null for the profile-wide contact and mail syncs. */
     readonly ruleId: string | null;
     readonly items: readonly GuardedDeletion[];
     readonly now: number;
@@ -121,7 +121,10 @@ function approvalLabel(db: AppDatabase, row: ApprovalRow): string {
   const rule = row.ruleId
     ? db.select().from(calendarSyncRules).where(eq(calendarSyncRules.id, row.ruleId)).get()
     : undefined;
-  return rule ? `${rule.appleCalendarName} → ${rule.googleCalendarName}` : 'Contacts';
+  if (rule) {
+    return `${rule.appleCalendarName} → ${rule.googleCalendarName}`;
+  }
+  return row.domain === 'mail' ? 'Mail' : 'Contacts';
 }
 
 export function toApprovalDto(db: AppDatabase, row: ApprovalRow): DeleteApprovalDto {
