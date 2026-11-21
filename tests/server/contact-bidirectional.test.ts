@@ -151,6 +151,18 @@ describe('Bidirectional contact sync (Apple Master) HTTP seam', () => {
       expect(world.googleContact(token, created.resourceName)?.groupResourceNames).toEqual([G_FAMILIE]);
     });
 
+    it('does not import a Google contact whose Apple twin exists outside the rule group', async () => {
+      const { sync, world, appleId, token } = await setup();
+      world.putAppleVCard(appleId, '/card/extern.vcf', appleCard('extern', 'Erika', 'Extern', ['EMAIL:erika@example.com']));
+      world.seedGoogleContact(token, { givenName: 'Erika', familyName: 'Extern', emails: ['ERIKA@example.com'] }, [G_FAMILIE]);
+      const cardsBefore = world.appleHrefs(appleId).length;
+
+      const result = await sync();
+
+      expect(result.actions.some((a) => a.action === 'create')).toBe(false);
+      expect(world.appleHrefs(appleId)).toHaveLength(cardsBefore);
+    });
+
     it('imports unmatched Google contacts and links matched ones on the Initial Sync', async () => {
       const scenario = await setupContacts();
       close = () => scenario.ctx.close();

@@ -30,7 +30,7 @@ import {
   type SyncedContactRow,
 } from './contact-store.js';
 import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
-import { addGroupMember, buildVCard, mergeIntoVCard, parseVCard } from './vcard.js';
+import { addGroupMember, buildVCard, displayName, mergeIntoVCard, parseVCard } from './vcard.js';
 
 export interface ContactSyncOptions {
   readonly db: AppDatabase;
@@ -115,13 +115,20 @@ function plan(
 
   const claims = (rule: ContactRuleRow, uid: string) =>
     rule.appleGroupUid === ALL_CONTACTS_GROUP || (book.groups.get(rule.appleGroupUid)?.card.memberUids.includes(uid) ?? false);
-  const labelsOf = (uid: string) =>
-    sortedUnique(rules.filter((rule) => claims(rule, uid)).map((rule) => rule.googleGroupResourceName));
   const enabled = rules.filter((rule) => rule.enabled);
   const inScope = (uid: string) => enabled.some((rule) => claims(rule, uid));
-  const pausedLabels = new Set(rules.filter((rule) => !rule.enabled).map((rule) => rule.googleGroupResourceName));
-  // A paused rule is not processed at all: what only it keeps in Google stays exactly as it is
-  const isFrozen = (row: SyncedContactRow) => parseLabels(row).some((label) => pausedLabels.has(label));
+  const enabledLabels = new Set(enabled.map((rule) => rule.googleGroupResourceName));
+  const pausedLabels = new Set(
+    rules.filter((rule) => !rule.enabled && !enabledLabels.has(rule.googleGroupResourceName)).map((rule) => rule.googleGroupResourceName),
+  );
+  const labelsOf = (uid: string) =>
+    sortedUnique(enabled.filter((rule) => claims(rule, uid)).map((rule) => rule.googleGroupResourceName));
+  // A paused rule is not processed at all: the labels it put on a contact stay exactly as they are
+  const heldLabels = (row: SyncedContactRow) => parseLabels(row).filter((label) => pausedLabels.has(label));
+  const isFrozen = (row: SyncedContactRow) => {
+    const stored = parseLabels(row);
+    return stored.length > 0 && heldLabels(row).length === stored.length;
+  };
   const trackedResources = new Set(rows.map((row) => row.googleResourceName));
   // Google-only contacts: linked to an untracked Apple contact (Initial Sync) or imported into Apple
   const unclaimed = (google?.changes.contacts ?? []).filter((contact) => !trackedResources.has(contact.resourceName));
@@ -159,12 +166,12 @@ function plan(
     if (!inScope(uid)) {
       continue;
     }
-    const labels = labelsOf(uid);
     const row = tracked.get(uid);
     if (row) {
-      entries.push(syncKnown(row, entry, labels));
+      entries.push(syncKnown(row, entry, sortedUnique([...labelsOf(uid), ...heldLabels(row)])));
       continue;
     }
+    const labels = labelsOf(uid);
     const match = findMatchingContact(candidates, entry.card.data);
     if (match) {
       candidates.splice(candidates.indexOf(match), 1);
@@ -187,7 +194,7 @@ function plan(
     // A released contact (no labels left) is no longer managed in Google; only the record remains
     const released = parseLabels(row).length === 0;
     if (entry) {
-      if (!released) {
+      if (parseLabels(row).length > heldLabels(row).length) {
         entries.push(leave(row));
       }
       continue;
@@ -200,9 +207,18 @@ function plan(
     const targets = enabled.filter(
       (rule) => rule.direction === 'bidirectional' && contact.groupResourceNames.includes(rule.googleGroupResourceName),
     );
-    if (targets.length > 0) {
-      entries.push(importToApple(contact, targets));
+    if (targets.length === 0) {
+      continue;
     }
+    // Its Apple twin may simply sit outside the rule's group: importing would duplicate it
+    const hasAppleTwin = [...book.contacts.values()].some(
+      ({ card }) => !tracked.has(card.uid) && findMatchingContact([contact], card.data) !== undefined,
+    );
+    entries.push(
+      hasAppleTwin
+        ? { report: report('skip', contact.resourceName, displayName(contact.data) || contact.resourceName, 'matches_apple_contact') }
+        : importToApple(contact, targets),
+    );
   }
   return { entries, trackedCount: rows.length };
 
@@ -323,7 +339,7 @@ function plan(
         if (labels.length > 0) {
           await providers.google.contacts.update(match.resourceName, { addGroups: labels, removeGroups: [] });
         }
-        insertSyncedContact(db, {
+        const id = insertSyncedContact(db, {
           profileId: profile.id,
           appleContactUid: card.uid,
           appleHref: object.href,
@@ -333,6 +349,7 @@ function plan(
           googleFingerprint: contactFingerprint(match.data),
           labels: JSON.stringify(labels),
         });
+        updateSyncedContact(db, id, { photoHash: await syncPhoto(match.resourceName, card.photo, '') });
       },
     };
   }
@@ -352,19 +369,32 @@ function plan(
     if (edit) {
       return writeBack(row, entry, edit);
     }
-    if (stored.join('\n') === labels.join('\n')) {
+    const labelsEqual = stored.join('\n') === labels.join('\n');
+    // A photo that never made it to Google (e.g. the upload failed) is retried without an Apple change
+    const photoPending = entry.card.photo !== null && photoHash(entry.card.photo) !== row.photoHash;
+    if (labelsEqual && !photoPending) {
       return { report: report('skip', row.appleContactUid, row.summary, 'unchanged') };
     }
     return {
-      report: report('update', row.appleContactUid, row.summary, 'labels_changed'),
+      report: report('update', row.appleContactUid, row.summary, labelsEqual ? 'photo_changed' : 'labels_changed'),
       apply: async () => {
-        await ignoreGoogleNotFound(() =>
-          providers.google.contacts.update(row.googleResourceName, {
-            addGroups: labels.filter((label) => !stored.includes(label)),
-            removeGroups: stored.filter((label) => !labels.includes(label)),
-          }),
-        );
-        updateSyncedContact(db, row.id, { labels: JSON.stringify(labels) });
+        let hash = row.photoHash;
+        try {
+          if (!labelsEqual) {
+            await providers.google.contacts.update(row.googleResourceName, {
+              addGroups: labels.filter((label) => !stored.includes(label)),
+              removeGroups: stored.filter((label) => !labels.includes(label)),
+            });
+          }
+          hash = await syncPhoto(row.googleResourceName, entry.card.photo, row.photoHash);
+        } catch (error) {
+          if (!(error instanceof GoogleContactNotFoundError)) {
+            throw error;
+          }
+          // Deleted by hand in Google: One-Way Sync leaves it, so there is no photo to retry either
+          hash = entry.card.photo ? photoHash(entry.card.photo) : hash;
+        }
+        updateSyncedContact(db, row.id, { labels: JSON.stringify(labels), photoHash: hash });
       },
     };
   }
@@ -417,16 +447,15 @@ function plan(
    * re-linked instead of duplicated.
    */
   function leave(row: SyncedContactRow): PlanEntry {
-    const stored = parseLabels(row);
+    const held = heldLabels(row);
+    const removed = parseLabels(row).filter((label) => !held.includes(label));
     return {
-      report: report(stored.length > 0 ? 'update' : 'skip', row.appleContactUid, row.summary, 'left_group'),
+      report: report('update', row.appleContactUid, row.summary, 'left_group'),
       apply: async () => {
-        if (stored.length > 0) {
-          await ignoreGoogleNotFound(() =>
-            providers.google.contacts.update(row.googleResourceName, { addGroups: [], removeGroups: stored }),
-          );
-        }
-        updateSyncedContact(db, row.id, { labels: '[]' });
+        await ignoreGoogleNotFound(() =>
+          providers.google.contacts.update(row.googleResourceName, { addGroups: [], removeGroups: removed }),
+        );
+        updateSyncedContact(db, row.id, { labels: JSON.stringify(held) });
       },
     };
   }

@@ -62,7 +62,7 @@ describe('Lossless Apple vCard 3.0 merging', () => {
       ...data,
       givenName: 'Maximilian',
       title: '',
-      emails: ['max@example.com', 'neu@example.com'],
+      emails: ['max@example.com'],
       note: 'Neue Notiz',
     });
 
@@ -72,7 +72,7 @@ describe('Lossless Apple vCard 3.0 merging', () => {
       givenName: 'Maximilian',
       familyName: 'Muster',
       title: '',
-      emails: ['max@example.com', 'neu@example.com'],
+      emails: ['max@example.com'],
       phones: ['+49 170 1234567', '+49 30 555 0100'],
       note: 'Neue Notiz',
       birthday: '1985-03-12',
@@ -94,6 +94,24 @@ describe('Lossless Apple vCard 3.0 merging', () => {
     }
     const photoBlock = original.slice(original.indexOf('PHOTO;'), original.indexOf('X-ABUID'));
     expect(merged).toContain(photoBlock);
+  });
+
+  it('keeps the label of an entry whose value was merely corrected', () => {
+    const data = parseVCard(original).data;
+
+    const merged = mergeIntoVCard(original, {
+      ...data,
+      emails: ['max@example.com', 'max.neu@example.com'],
+      phones: ['+49 170 1234567', '+49 30 555 0199'],
+    });
+
+    expect(merged).toContain('item1.EMAIL;type=INTERNET:max.neu@example.com\r\nitem1.X-ABLabel:Büro');
+    expect(merged).toContain('item2.TEL:+49 30 555 0199\r\nitem2.X-ABLabel:_$!<Main>!$_');
+    expect(merged).not.toContain('max.work@example.com');
+    expect(parseVCard(merged).data).toMatchObject({
+      emails: ['max@example.com', 'max.neu@example.com'],
+      phones: ['+49 170 1234567', '+49 30 555 0199'],
+    });
   });
 
   it('adds fields the card did not have and keeps the original line endings', () => {

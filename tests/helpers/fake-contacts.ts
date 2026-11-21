@@ -60,6 +60,7 @@ export class FakeContactWorld {
   private readonly apple = new Map<string, AppleBook>();
   private readonly google = new Map<string, GoogleBook>();
   private beforeNextApplePut: (() => void) | null = null;
+  private photoFailure: Error | null = null;
   private counter = 0;
 
   // ---- Apple -------------------------------------------------------------------------------
@@ -135,6 +136,11 @@ export class FakeContactWorld {
   /** Simulates a manual deletion in Google Contacts. */
   removeGoogleContact(refreshToken: string, resourceName: string): void {
     this.drop(this.googleBook(refreshToken), resourceName);
+  }
+
+  /** Makes the next photo upload fail once. */
+  failNextPhotoUpload(error: Error): void {
+    this.photoFailure = error;
   }
 
   expireGoogleSyncTokens(refreshToken: string): void {
@@ -262,6 +268,11 @@ export class FakeContactWorld {
       },
       updatePhoto: async (resourceName, photo) => {
         const b = book();
+        if (this.photoFailure) {
+          const failure = this.photoFailure;
+          this.photoFailure = null;
+          throw failure;
+        }
         const existing = b.contacts.get(resourceName);
         if (!existing) {
           throw new GoogleContactNotFoundError(resourceName);

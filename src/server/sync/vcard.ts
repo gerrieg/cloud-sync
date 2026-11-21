@@ -174,6 +174,16 @@ const addressKey = (a: ContactAddress) =>
 const sameKeys = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
 
+/** The display name (`FN`) of a contact: its name parts, else organization, else first email. */
+export function displayName(data: ContactData): string {
+  return (
+    [data.prefix, data.givenName, data.middleName, data.familyName, data.suffix].filter(Boolean).join(' ') ||
+    data.organization ||
+    data.emails[0] ||
+    ''
+  );
+}
+
 /**
  * Applies `data` to an existing card. Only properties whose value differs are rewritten (keeping
  * their group prefix and parameters); a removed property takes the other lines of its `itemN.`
@@ -213,29 +223,42 @@ export function mergeIntoVCard(text: string, data: ContactData): string {
     encode: (value: T) => { params: string; value: string },
   ) => {
     const missing = desired.map(keyOf);
-    const removedGroups = new Set<string | null>();
-    out = out.filter((line) => {
+    const stale: Line[] = [];
+    for (const line of out) {
       if (line.name !== name) {
-        return true;
+        continue;
       }
       const index = missing.indexOf(keyOf(decode(line)));
       if (index >= 0) {
         missing.splice(index, 1);
-        return true;
+      } else {
+        stale.push(line);
       }
-      removedGroups.add(line.group);
-      return false;
-    });
-    removedGroups.delete(null);
-    dropGroups(removedGroups);
-    for (const value of desired) {
-      const key = keyOf(value);
-      const index = missing.indexOf(key);
+    }
+    const added = desired.filter((value) => {
+      const index = missing.indexOf(keyOf(value));
       if (index >= 0) {
         missing.splice(index, 1);
-        const { params, value: encoded } = encode(value);
-        insertBeforeEnd(makeLine(name, params, encoded, null, eol));
       }
+      return index >= 0;
+    });
+
+    // A value that was merely corrected keeps its line, group and label (e.g. `item1.X-ABLabel`)
+    const paired = Math.min(stale.length, added.length);
+    for (let i = 0; i < paired; i += 1) {
+      const line = stale[i];
+      out[out.indexOf(line)] = makeLine(name, line.params, encode(added[i]).value, line.group, eol);
+    }
+    const removedGroups = new Set<string | null>();
+    for (const line of stale.slice(paired)) {
+      out.splice(out.indexOf(line), 1);
+      removedGroups.add(line.group);
+    }
+    removedGroups.delete(null);
+    dropGroups(removedGroups);
+    for (const value of added.slice(paired)) {
+      const { params, value: encoded } = encode(value);
+      insertBeforeEnd(makeLine(name, params, encoded, null, eol));
     }
   };
 
@@ -245,11 +268,7 @@ export function mergeIntoVCard(text: string, data: ContactData): string {
     const n = [data.familyName, data.givenName, data.middleName, data.prefix, data.suffix].map(escape);
     setSingle('N', n.join(';'));
   }
-  const display =
-    [data.prefix, data.givenName, data.middleName, data.familyName, data.suffix].filter(Boolean).join(' ') ||
-    data.organization ||
-    data.emails[0] ||
-    '';
+  const display = displayName(data);
   if (display && (namesChanged || !out.some((l) => l.name === 'FN'))) {
     setSingle('FN', escape(display));
   }

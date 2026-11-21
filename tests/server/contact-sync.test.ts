@@ -227,6 +227,33 @@ describe('One-way contact sync HTTP seam', () => {
     });
   });
 
+  describe('Photos after failures and links', () => {
+    const photo = (bytes: number[]) => `PHOTO;ENCODING=b;TYPE=JPEG:${Buffer.from(bytes).toString('base64')}`;
+
+    it('retries a photo whose upload failed right after the contact was created', async () => {
+      const { sync, google, world, appleId } = await setup();
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Vorname1', 'Nachname1', [photo([1, 2, 3])]));
+      world.failNextPhotoUpload(new Error('People API down'));
+
+      expect((await sync()).status).toBe('error');
+      const retried = await sync();
+
+      expect(retried.status).toBe('ok');
+      expect(world.photoUploads.map((u) => [...u.photo])).toEqual([[1, 2, 3]]);
+      expect(google().filter((c) => c.data.givenName === 'Vorname1')).toHaveLength(1);
+    });
+
+    it('uploads the Apple photo of a contact that was linked to an existing Google contact', async () => {
+      const { sync, world, appleId, token } = await setup();
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Vorname1', 'Nachname1', ['EMAIL:u1@example.com', photo([7, 7])]));
+      const existing = world.seedGoogleContact(token, { givenName: 'Alias', emails: ['u1@example.com'] });
+
+      await sync();
+
+      expect(world.photoUploads).toEqual([{ resourceName: existing.resourceName, photo: Buffer.from([7, 7]) }]);
+    });
+  });
+
   describe('Dry-Run', () => {
     it('previews exactly what the real run does, without writing anything', async () => {
       const { sync, dryRun, world, ctx, google } = await setup();
@@ -266,6 +293,20 @@ describe('One-way contact sync HTTP seam', () => {
       // A contact that is also in an active group keeps the paused group's label
       expect([...byName('Vorname3')!.groupResourceNames].sort()).toEqual([G_FAMILIE, G_ARBEIT].sort());
       expect(google()).toHaveLength(4);
+    });
+
+    it('neither adds nor removes the label of a paused rule on contacts that also belong to an active rule', async () => {
+      const { sync, setGroups, api, rulesPath, byName } = await setup();
+      await sync();
+      const arbeit = (await api.json<Array<{ id: string; appleGroupName: string }>>(rulesPath)).find((r) => r.appleGroupName === 'Arbeit')!;
+      await api.request(`${rulesPath}/${arbeit.id}`, { method: 'PATCH', body: { enabled: false } });
+
+      // u3 leaves Arbeit, u1 joins it: the paused rule must not act on either
+      setGroups(['u1', 'u2', 'u3'], ['u1', 'u4']);
+      await sync();
+
+      expect([...byName('Vorname3')!.groupResourceNames].sort()).toEqual([G_FAMILIE, G_ARBEIT].sort());
+      expect(byName('Vorname1')?.groupResourceNames).toEqual([G_FAMILIE]);
     });
 
     it('does nothing when every rule is paused', async () => {
