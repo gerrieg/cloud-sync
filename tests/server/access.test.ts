@@ -35,6 +35,8 @@ describe('classifyRoute', () => {
     '/api/auth/me',
     '/api/auth/logout',
     '/api/profiles',
+    '/api/profiles/p1/test-apple',
+    '/api/auth/google/callback',
     '/api/health/extra',
     '/api/auth/login/extra',
     '/webhooks/google',

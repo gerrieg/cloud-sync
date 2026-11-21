@@ -4,6 +4,7 @@ import { createApp, type CreateAppOptions } from '../../src/server/app.js';
 import type { Clock } from '../../src/server/clock.js';
 import { parseConfig, type AppConfig } from '../../src/server/config.js';
 import { createDatabase, type DatabaseContext } from '../../src/server/db/index.js';
+import { FakeSyncProviders } from './fake-providers.js';
 
 export const TEST_USERNAME = 'admin';
 export const TEST_PASSWORD = 'correct-horse-battery-staple';
@@ -49,6 +50,9 @@ export interface TestContext {
   readonly config: AppConfig;
   readonly dbContext: DatabaseContext;
   readonly clock: FakeClock;
+  readonly providers: FakeSyncProviders;
+  /** Logs in as the admin and returns a `cookie` header value for authenticated requests. */
+  signIn(): Promise<string>;
   generateTotp(stepOffset?: number): string;
   close(): void;
 }
@@ -72,10 +76,12 @@ export function createTestContext(options?: {
 
   const clock = new FakeClock(options?.initialTimeMs);
   const dbContext = createDatabase(':memory:');
+  const providers = new FakeSyncProviders();
   const appOptions: CreateAppOptions = {
     config,
     dbContext,
     clock,
+    createSyncProviders: providers.factory,
     staticDir: options?.staticDir,
   };
   const app = createApp(appOptions);
@@ -92,6 +98,25 @@ export function createTestContext(options?: {
     config,
     dbContext,
     clock,
+    providers,
+    async signIn() {
+      const response = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          username: TEST_USERNAME,
+          password: TEST_PASSWORD,
+          totpCode: this.generateTotp(0),
+        }),
+      });
+      const cookie = response.headers.get('set-cookie')?.split(';')[0];
+      if (response.status !== 200 || !cookie) {
+        throw new Error(`Test sign-in failed (${response.status})`);
+      }
+      // Advance one TOTP step so a later signIn() in the same test is not a replay
+      this.clock.advanceSeconds(30);
+      return cookie;
+    },
     generateTotp(stepOffset = 0): string {
       return totp.generate({ timestamp: clock.now() + stepOffset * 30_000 });
     },

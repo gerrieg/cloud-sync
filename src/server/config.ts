@@ -10,6 +10,7 @@ export interface AppConfig {
   readonly encryptionKey: Buffer;
   readonly googleClientId: string;
   readonly googleClientSecret: string;
+  readonly publicBaseUrl: string | null;
   readonly port: number;
   readonly databasePath: string;
   readonly nodeEnv: NodeEnv;
@@ -119,6 +120,20 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
     issues.push('GOOGLE_CLIENT_SECRET is required and must be non-empty');
   }
 
+  let publicBaseUrl: string | null = null;
+  const rawPublicBaseUrl = env.PUBLIC_BASE_URL?.trim();
+  if (rawPublicBaseUrl) {
+    try {
+      const parsed = new URL(rawPublicBaseUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('unsupported protocol');
+      }
+      publicBaseUrl = parsed.origin;
+    } catch {
+      issues.push('PUBLIC_BASE_URL must be an http(s) URL such as https://sync.example.com');
+    }
+  }
+
   let port = 3000;
   const rawPort = env.PORT?.trim();
   if (rawPort !== undefined && rawPort !== '') {
@@ -154,6 +169,7 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
     encryptionKey,
     googleClientId,
     googleClientSecret,
+    publicBaseUrl,
     port,
     databasePath,
     nodeEnv,

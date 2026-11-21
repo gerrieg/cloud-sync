@@ -9,7 +9,11 @@ import { systemClock, type Clock } from './clock.js';
 import type { AppConfig } from './config.js';
 import type { DatabaseContext } from './db/index.js';
 import { createAuthRoutes } from './routes/auth.js';
+import { createRealSyncProviders } from './providers/real.js';
+import type { SyncProvidersFactory } from './providers/types.js';
+import { createGoogleOAuthRoutes } from './routes/google-oauth.js';
 import { createHealthRoutes } from './routes/health.js';
+import { createProfileRoutes } from './routes/profiles.js';
 
 export interface AppVariables {
   session: SessionPayload | null;
@@ -19,12 +23,19 @@ export interface CreateAppOptions {
   readonly config: AppConfig;
   readonly dbContext: DatabaseContext;
   readonly clock?: Clock;
+  readonly createSyncProviders?: SyncProvidersFactory;
   readonly staticDir?: string;
 }
 
 export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVariables }> {
   const { config, dbContext, staticDir } = options;
   const clock = options.clock ?? systemClock;
+  const createSyncProviders =
+    options.createSyncProviders ??
+    createRealSyncProviders({
+      googleClientId: config.googleClientId,
+      googleClientSecret: config.googleClientSecret,
+    });
   const app = new Hono<{ Variables: AppVariables }>();
 
   // Access-decision middleware enforces public vs self-authenticated vs session-protected routes
@@ -51,6 +62,14 @@ export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVaria
   });
 
   app.route('/api/health', createHealthRoutes(dbContext.sqlite));
+  app.route(
+    '/api/profiles',
+    createProfileRoutes({ config, db: dbContext.db, clock, createSyncProviders }),
+  );
+  app.route(
+    '/api/auth/google',
+    createGoogleOAuthRoutes({ config, db: dbContext.db, clock, createSyncProviders }),
+  );
   app.route(
     '/api/auth',
     createAuthRoutes({

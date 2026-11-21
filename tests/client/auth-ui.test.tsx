@@ -31,7 +31,8 @@ describe('Auth UI (fetch boundary)', () => {
 
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, 401))
-      .mockResolvedValueOnce(jsonResponse({ username: 'admin' }, 200));
+      .mockResolvedValueOnce(jsonResponse({ username: 'admin' }, 200))
+      .mockResolvedValueOnce(jsonResponse([], 200));
 
     render(<App />);
 
@@ -109,7 +110,8 @@ describe('Auth UI (fetch boundary)', () => {
 
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, 401))
-      .mockResolvedValueOnce(jsonResponse({ username: 'admin' }, 200));
+      .mockResolvedValueOnce(jsonResponse({ username: 'admin' }, 200))
+      .mockResolvedValueOnce(jsonResponse([], 200));
 
     render(<App />);
     await screen.findByRole('heading', { name: /sign in/i });
@@ -129,6 +131,7 @@ describe('Auth UI (fetch boundary)', () => {
 
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ username: 'admin' }, 200))
+      .mockResolvedValueOnce(jsonResponse([], 200))
       .mockResolvedValueOnce(jsonResponse({ ok: true }, 200));
 
     render(<App />);
@@ -140,7 +143,7 @@ describe('Auth UI (fetch boundary)', () => {
       expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
     });
     expect(window.location.pathname).toBe('/login');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/auth/logout');
-    expect(fetchMock.mock.calls[1][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/auth/logout');
+    expect(fetchMock.mock.calls[2][1]?.method).toBe('POST');
   });
 });
