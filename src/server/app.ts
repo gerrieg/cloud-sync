@@ -13,6 +13,7 @@ import type { DatabaseContext } from './db/index.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createRealSyncProviders } from './providers/real.js';
 import type { SyncProvidersFactory } from './providers/types.js';
+import { createDeleteApprovalRoutes } from './routes/delete-approvals.js';
 import { createGoogleOAuthRoutes } from './routes/google-oauth.js';
 import { createHealthRoutes } from './routes/health.js';
 import { createProfileRoutes } from './routes/profiles.js';
@@ -68,6 +69,10 @@ export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.route(
     '/api/profiles',
     createProfileRoutes({ config, db: dbContext.db, clock, locks, createSyncProviders }),
+  );
+  app.route(
+    '/api/delete-approvals',
+    createDeleteApprovalRoutes({ config, db: dbContext.db, clock, locks, createSyncProviders }),
   );
   app.route(
     '/api/auth/google',

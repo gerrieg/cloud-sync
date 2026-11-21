@@ -26,7 +26,7 @@ export function DirectionSelect({ value, readOnlyCalendar, disabled, onChange }:
       </label>
       {effective === 'bidirectional' && (
         <p className="mt-1 max-w-56 text-xs text-slate-500">
-          Google → Apple changes are not synced yet; Apple changes are pushed already.
+          Uncontested Google edits and deletions are carried over to Apple; if both sides changed, Apple wins.
         </p>
       )}
     </div>

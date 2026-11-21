@@ -175,12 +175,12 @@ describe('Calendar sync UI (fetch boundary)', () => {
     expect(screen.getByText(/read-only calendars sync one-way/i)).toBeInTheDocument();
   });
 
-  it('lets the admin choose the direction, with a note that Google → Apple is not synced yet', async () => {
+  it('lets the admin choose the direction, with a note on how Google changes are handled', async () => {
     const user = userEvent.setup();
     const backend = await openPanel();
 
     await user.selectOptions(await screen.findByLabelText(/^direction$/i), 'bidirectional');
-    expect(screen.getByText(/google → apple changes are not synced yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/uncontested google edits and deletions are carried over to apple/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /add rule/i }));
 
     await screen.findByText(/Privat → Anna/);

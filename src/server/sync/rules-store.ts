@@ -7,10 +7,19 @@ import { calendarSyncRules } from '../db/schema.js';
 export type RuleRow = typeof calendarSyncRules.$inferSelect;
 export type NewRule = Omit<
   typeof calendarSyncRules.$inferInsert,
-  'id' | 'appleCtag' | 'initialSyncCompletedAt'
+  'id' | 'appleCtag' | 'googleSyncToken' | 'initialSyncCompletedAt'
 >;
 export type RulePatch = Partial<
-  Pick<RuleRow, 'direction' | 'syncWindowDays' | 'syncReminders' | 'enabled' | 'appleCtag' | 'initialSyncCompletedAt'>
+  Pick<
+    RuleRow,
+    | 'direction'
+    | 'syncWindowDays'
+    | 'syncReminders'
+    | 'enabled'
+    | 'appleCtag'
+    | 'googleSyncToken'
+    | 'initialSyncCompletedAt'
+  >
 >;
 
 export function toRuleDto(row: RuleRow): CalendarRuleDto {

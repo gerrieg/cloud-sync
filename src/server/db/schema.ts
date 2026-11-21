@@ -43,6 +43,8 @@ export const calendarSyncRules = sqliteTable(
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     /** Apple collection tag seen after the last fully successful run (change-detection cursor). */
     appleCtag: text('apple_ctag'),
+    /** Google delta cursor of bidirectional rules; null forces a full re-reconciliation. */
+    googleSyncToken: text('google_sync_token'),
     initialSyncCompletedAt: integer('initial_sync_completed_at'),
   },
   (table) => [
@@ -69,6 +71,25 @@ export const syncedEvents = sqliteTable(
     /** Google ids of overridden occurrences, keyed by the original start of the occurrence. */
     googleExceptionIds: text('google_exception_ids').notNull().default('{}'),
     foreignInvitation: integer('foreign_invitation', { mode: 'boolean' }).notNull().default(false),
+    /** Content hash of the Google event as last written or read; tells our own echoes from real edits. */
+    googleFingerprint: text('google_fingerprint').notNull().default(''),
   },
   (table) => [uniqueIndex('synced_events_rule_href_idx').on(table.ruleId, table.appleHref)],
 );
+
+export const pendingDeleteApprovals = sqliteTable('pending_delete_approvals', {
+  id: text('id').primaryKey(),
+  profileId: text('profile_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  ruleId: text('rule_id')
+    .notNull()
+    .references(() => calendarSyncRules.id, { onDelete: 'cascade' }),
+  status: text('status', { enum: ['pending', 'approved', 'dismissed'] })
+    .notNull()
+    .default('pending'),
+  /** JSON array with the full planned deletion batch, exactly as it will be executed on approval. */
+  items: text('items').notNull(),
+  createdAt: integer('created_at').notNull(),
+  resolvedAt: integer('resolved_at'),
+});

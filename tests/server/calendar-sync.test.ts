@@ -2,11 +2,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CalendarRuleDto, SyncRunResult } from '../../src/shared/calendar.js';
 import type { ProfileDto } from '../../src/shared/profile.js';
 import { APPLE_ID, GOOGLE_REFRESH_TOKEN, TestApi } from '../helpers/api.js';
-import { icsFixture } from '../helpers/fixtures.js';
+import { icsFixture, simpleIcs } from '../helpers/fixtures.js';
 import { createTestContext } from '../helpers/test-app.js';
 
 const HOME = '/cal/home/';
 const ZAHNARZT_UID = '4F6C2B1A-0001-4B1E-9A11-AAAAAAAAAAAA';
+
+/**
+ * Unchanged filler events: the Delete Guard halts deletions of more than 20% of the tracked
+ * events, so a scenario that deletes a single event needs a few others around it.
+ */
+function addFillerEvents(world: { putAppleEvent(appleId: string, url: string, href: string, ics: string): void }, count = 3) {
+  for (let i = 1; i <= count; i += 1) {
+    world.putAppleEvent(APPLE_ID, HOME, `filler-${i}.ics`, simpleIcs(`filler-${i}`, `Füller ${i}`, i));
+  }
+}
+const withoutSkips = (actions: readonly { action: string }[]) => actions.filter((a) => a.action !== 'skip');
 
 describe('One-way calendar sync HTTP seam', () => {
   let api: TestApi | undefined;
@@ -83,6 +94,7 @@ describe('One-way calendar sync HTTP seam', () => {
     const original = icsFixture('timed-berlin.ics');
     world.putAppleEvent(APPLE_ID, HOME, 'zahnarzt.ics', original);
     world.putAppleEvent(APPLE_ID, HOME, 'geburtstag.ics', icsFixture('all-day.ics'));
+    addFillerEvents(world);
     await sync(api, profile);
     const zahnarztId = googleEvents(world).find((e) => e.summary === 'Zahnarzt')!.id;
 
@@ -90,14 +102,14 @@ describe('One-way calendar sync HTTP seam', () => {
     world.removeAppleEvent(APPLE_ID, HOME, 'geburtstag.ics');
     const result = (await (await sync(api, profile)).json()) as SyncRunResult;
 
-    expect(result.rules[0].actions).toEqual([
+    expect(withoutSkips(result.rules[0].actions)).toEqual([
       { action: 'update', ruleId: rule.id, uid: ZAHNARZT_UID, summary: 'Zahnarzt (verlegt)', foreignInvitation: false },
       { action: 'delete', ruleId: rule.id, uid: '4F6C2B1A-0002-4B1E-9A11-BBBBBBBBBBBB', summary: 'Geburtstag Oma' },
     ]);
     const events = googleEvents(world);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ id: zahnarztId, summary: 'Zahnarzt (verlegt)' });
-    expect(world.writes.slice(2).every((w) => w.sendUpdates === 'none')).toBe(true);
+    expect(events).toHaveLength(4);
+    expect(events.find((e) => e.id === zahnarztId)).toMatchObject({ summary: 'Zahnarzt (verlegt)' });
+    expect(world.writes.slice(5).every((w) => w.sendUpdates === 'none')).toBe(true);
   });
 
   it('refuses to sync a paused Profile and requires connected accounts', async () => {
@@ -125,6 +137,7 @@ describe('One-way calendar sync HTTP seam', () => {
       world.putAppleEvent(APPLE_ID, HOME, 'zahnarzt.ics', original);
       world.putAppleEvent(APPLE_ID, HOME, 'geburtstag.ics', icsFixture('all-day.ics'));
       world.putAppleEvent(APPLE_ID, HOME, 'kurs.ics', icsFixture('recurring-count.ics'));
+      addFillerEvents(world, 2);
       await sync(api, profile);
 
       api.ctx.clock.advanceMinutes(5);
@@ -143,6 +156,8 @@ describe('One-way calendar sync HTTP seam', () => {
       expect(result.rules[0].actions.map((a) => [a.action, a.summary, a.reason])).toEqual([
         ['update', 'Zahnarzt neu', undefined],
         ['skip', 'Kurs', 'unchanged'],
+        ['skip', 'Füller 1', 'unchanged'],
+        ['skip', 'Füller 2', 'unchanged'],
         ['create', 'Call mit Team', undefined],
         ['delete', 'Geburtstag Oma', undefined],
       ]);
@@ -194,6 +209,7 @@ describe('One-way calendar sync HTTP seam', () => {
       world.putAppleEvent(APPLE_ID, HOME, 'zahnarzt.ics', icsFixture('timed-berlin.ics'));
       world.putAppleEvent(APPLE_ID, HOME, 'geburtstag.ics', icsFixture('all-day.ics'));
       world.putAppleEvent(APPLE_ID, HOME, 'call.ics', icsFixture('utc.ics'));
+      addFillerEvents(world, 2);
 
       const result = (await (await sync(api, profile)).json()) as SyncRunResult;
 
@@ -201,12 +217,14 @@ describe('One-way calendar sync HTTP seam', () => {
         ['skip', 'Zahnarzt', 'matched_existing'],
         ['skip', 'Geburtstag Oma', 'matched_existing'],
         ['create', 'Call mit Team', undefined],
+        ['create', 'Füller 1', undefined],
+        ['create', 'Füller 2', undefined],
       ]);
-      // Only the genuinely new event was written; nothing was duplicated or deleted
-      expect(world.writes.map((w) => w.kind)).toEqual(['insert']);
+      // Only the genuinely new events were written; nothing was duplicated or deleted
+      expect(world.writes.map((w) => w.kind)).toEqual(['insert', 'insert', 'insert']);
       const ids = googleEvents(world).map((e) => e.id);
       expect(ids).toEqual(expect.arrayContaining([byUid.id, byTitle.id, unrelated.id]));
-      expect(ids).toHaveLength(4);
+      expect(ids).toHaveLength(6);
 
       // Adopted events are tracked from now on: an Apple change updates them in place
       const changed = icsFixture('timed-berlin.ics').replace('SUMMARY:Zahnarzt', 'SUMMARY:Zahnarzt 2');

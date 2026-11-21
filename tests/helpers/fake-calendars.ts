@@ -1,5 +1,8 @@
 import {
+  AppleObjectNotFoundError,
+  ApplePreconditionFailedError,
   GoogleEventNotFoundError,
+  GoogleSyncTokenExpiredError,
   type AppleCalendarInfo,
   type AppleCalendarObject,
   type GoogleCalendarInfo,
@@ -16,6 +19,11 @@ export interface GoogleWrite {
   readonly sendUpdates: string;
 }
 
+export interface AppleWrite {
+  readonly kind: 'put' | 'delete';
+  readonly href: string;
+}
+
 interface AppleCalendarState {
   info: Omit<AppleCalendarInfo, 'ctag'>;
   ctag: string;
@@ -25,6 +33,12 @@ interface AppleCalendarState {
 interface GoogleCalendarState {
   info: GoogleCalendarInfo;
   events: Map<string, GoogleEvent>;
+  /** Monotonic change counter; sync tokens are `st-<version>`. */
+  version: number;
+  /** Tokens issued before this version are answered with HTTP 410 Gone. */
+  minValidVersion: number;
+  changedAt: Map<string, number>;
+  deletedAt: Map<string, number>;
 }
 
 export interface SeedGoogleEvent {
@@ -41,6 +55,8 @@ export interface SeedGoogleEvent {
 export class FakeCalendarWorld {
   /** Every Google write, in order, with the `sendUpdates` it was called with. */
   readonly writes: GoogleWrite[] = [];
+  /** Every Apple write (CalDAV PUT / DELETE), in order. */
+  readonly appleWrites: AppleWrite[] = [];
   /** Chronological log of read calls, e.g. `apple.list:anna@icloud.com`. */
   readonly trace: string[] = [];
 
@@ -48,6 +64,7 @@ export class FakeCalendarWorld {
   private readonly google = new Map<string, Map<string, GoogleCalendarState>>();
   private readonly gates = new Map<string, Promise<void>>();
   private readonly invalidGrant = new Set<string>();
+  private beforeNextApplePut: (() => void) | null = null;
   private readonly failingWrites = new Map<string, { remaining: number; error: Error }>();
   private counter = 0;
 
@@ -102,6 +119,10 @@ export class FakeCalendarWorld {
         writable: calendar.writable ?? true,
       },
       events: new Map(),
+      version: 0,
+      minValidVersion: 0,
+      changedAt: new Map(),
+      deletedAt: new Map(),
     });
     this.google.set(refreshToken, calendars);
   }
@@ -116,7 +137,7 @@ export class FakeCalendarWorld {
       iCalUID: event.iCalUID ?? `${this.next('uid')}@google.com`,
       reminders: { useDefault: false, overrides: [] },
     };
-    this.googleCalendar(refreshToken, calendarId).events.set(created.id, created);
+    this.storeGoogleEvent(this.googleCalendar(refreshToken, calendarId), created);
     return created;
   }
 
@@ -136,12 +157,24 @@ export class FakeCalendarWorld {
     if (!existing) {
       throw new GoogleEventNotFoundError(eventId);
     }
-    events.set(eventId, { ...existing, ...patch });
+    this.storeGoogleEvent(this.googleCalendar(refreshToken, calendarId), { ...existing, ...patch });
   }
 
   /** Simulates a manual deletion made in the Google Calendar UI. */
   removeGoogleEvent(refreshToken: string, calendarId: string, eventId: string): void {
-    this.googleCalendar(refreshToken, calendarId).events.delete(eventId);
+    this.dropGoogleEvent(this.googleCalendar(refreshToken, calendarId), eventId);
+  }
+
+  /** Runs `change` right before the next overwrite reaches Apple, i.e. after the caller read the ETag. */
+  changeAppleBeforeNextOverwrite(change: () => void): void {
+    this.beforeNextApplePut = change;
+  }
+
+  /** Makes every sync token issued so far stale: Google answers the next delta with HTTP 410. */
+  expireGoogleSyncTokens(refreshToken: string, calendarId: string): void {
+    const calendar = this.googleCalendar(refreshToken, calendarId);
+    calendar.version += 1;
+    calendar.minValidVersion = calendar.version;
   }
 
   /** Holds every Google write of this account until `release()` is called. */
@@ -192,6 +225,42 @@ export class FakeCalendarWorld {
           ([href, object]): AppleCalendarObject => ({ href, etag: object.etag, ics: object.ics }),
         );
       },
+      putObject: async (calendarUrl, input) => {
+        if (input.href !== null && this.beforeNextApplePut) {
+          const change = this.beforeNextApplePut;
+          this.beforeNextApplePut = null;
+          change();
+        }
+        const calendar = this.appleCalendar(appleId ?? '', calendarUrl);
+        const href = input.href ?? `${calendarUrl}${input.uid}.ics`;
+        if (input.href !== null) {
+          const existing = calendar.objects.get(href);
+          if (!existing) {
+            throw new AppleObjectNotFoundError(href);
+          }
+          if (existing.etag !== input.etag) {
+            throw new ApplePreconditionFailedError(href);
+          }
+        }
+        this.appleWrites.push({ kind: 'put', href });
+        const etag = this.next('etag');
+        calendar.objects.set(href, { etag, ics: input.ics });
+        calendar.ctag = this.next('ctag');
+        return { href, etag };
+      },
+      deleteObject: async (href, etag) => {
+        const calendar = [...this.appleCalendarsOf(appleId).values()].find((c) => c.objects.has(href));
+        const existing = calendar?.objects.get(href);
+        if (!calendar || !existing) {
+          throw new AppleObjectNotFoundError(href);
+        }
+        if (existing.etag !== etag) {
+          throw new ApplePreconditionFailedError(href);
+        }
+        this.appleWrites.push({ kind: 'delete', href });
+        calendar.objects.delete(href);
+        calendar.ctag = this.next('ctag');
+      },
     };
   }
 
@@ -227,39 +296,71 @@ export class FakeCalendarWorld {
         authenticate();
         return this.googleEvents(token, calendarId);
       },
+      listChanges: async (calendarId, syncToken) => {
+        this.trace.push(`google.changes:${token}:${calendarId}:${syncToken ?? 'full'}`);
+        authenticate();
+        const calendar = this.googleCalendar(token, calendarId);
+        const nextSyncToken = `st-${calendar.version}`;
+        if (syncToken === null) {
+          return { events: this.googleEvents(token, calendarId), deletedIds: [], nextSyncToken };
+        }
+        const since = Number(syncToken.replace('st-', ''));
+        if (Number.isNaN(since) || since < calendar.minValidVersion) {
+          throw new GoogleSyncTokenExpiredError();
+        }
+        return {
+          events: [...calendar.events.values()].filter((e) => (calendar.changedAt.get(e.id) ?? 0) > since),
+          deletedIds: [...calendar.deletedAt].filter(([, at]) => at > since).map(([id]) => id),
+          nextSyncToken,
+        };
+      },
       insertEvent: async (calendarId, draft, options) => {
         await beforeWrite({ kind: 'insert', calendarId, eventId: null, sendUpdates: options.sendUpdates });
         const event: GoogleEvent = { ...draft, id: this.next('evt') };
-        this.googleCalendar(token, calendarId).events.set(event.id, event);
+        this.storeGoogleEvent(this.googleCalendar(token, calendarId), event);
         return event;
       },
       updateEvent: async (calendarId, eventId, draft, options) => {
         await beforeWrite({ kind: 'update', calendarId, eventId, sendUpdates: options.sendUpdates });
-        const events = this.googleCalendar(token, calendarId).events;
-        if (!events.has(eventId)) {
+        const calendar = this.googleCalendar(token, calendarId);
+        if (!calendar.events.has(eventId)) {
           throw new GoogleEventNotFoundError(eventId);
         }
         const event: GoogleEvent = { ...draft, id: eventId };
-        events.set(eventId, event);
+        this.storeGoogleEvent(calendar, event);
         return event;
       },
       deleteEvent: async (calendarId, eventId, options) => {
         await beforeWrite({ kind: 'delete', calendarId, eventId, sendUpdates: options.sendUpdates });
-        const events = this.googleCalendar(token, calendarId).events;
-        if (!events.delete(eventId)) {
+        const calendar = this.googleCalendar(token, calendarId);
+        if (!calendar.events.has(eventId)) {
           throw new GoogleEventNotFoundError(eventId);
         }
-        // Deleting a series also removes its overridden occurrences
-        for (const [id, event] of events) {
-          if (event.recurringEventId === eventId) {
-            events.delete(id);
-          }
-        }
+        this.dropGoogleEvent(calendar, eventId);
       },
     };
   }
 
   // ---- internals ---------------------------------------------------------------------------
+
+  private storeGoogleEvent(calendar: GoogleCalendarState, event: GoogleEvent): void {
+    calendar.version += 1;
+    calendar.events.set(event.id, event);
+    calendar.changedAt.set(event.id, calendar.version);
+    calendar.deletedAt.delete(event.id);
+  }
+
+  /** Deleting a series also removes its overridden occurrences. */
+  private dropGoogleEvent(calendar: GoogleCalendarState, eventId: string): void {
+    for (const [id, event] of [...calendar.events]) {
+      if (id === eventId || event.recurringEventId === eventId) {
+        calendar.version += 1;
+        calendar.events.delete(id);
+        calendar.changedAt.delete(id);
+        calendar.deletedAt.set(id, calendar.version);
+      }
+    }
+  }
 
   private next(prefix: string): string {
     this.counter += 1;

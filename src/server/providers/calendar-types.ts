@@ -66,3 +66,52 @@ export class GoogleEventNotFoundError extends Error {
     this.name = 'GoogleEventNotFoundError';
   }
 }
+
+/** The identity of one Apple CalDAV resource at a point in time. */
+export interface AppleObjectRef {
+  readonly href: string;
+  readonly etag: string;
+}
+
+/** A write of one iCalendar resource to Apple CalDAV. */
+export interface AppleObjectWrite {
+  /** The resource to overwrite, or null to create a new one (the adapter derives its URL from `uid`). */
+  readonly href: string | null;
+  readonly uid: string;
+  readonly ics: string;
+  /** ETag the overwrite is conditional on (`If-Match`); ignored for creates. */
+  readonly etag: string | null;
+}
+
+/** A page-less view of what changed in a Google calendar since a sync token. */
+export interface GoogleEventChanges {
+  /** Created or modified events (never cancelled ones). */
+  readonly events: readonly GoogleEvent[];
+  /** Ids of events that were deleted. Always empty for a full listing. */
+  readonly deletedIds: readonly string[];
+  /** Pass this back next time to receive only what changed after this read. */
+  readonly nextSyncToken: string;
+}
+
+/** Google answered HTTP 410 Gone: the sync token is stale and a full listing is needed. */
+export class GoogleSyncTokenExpiredError extends Error {
+  constructor() {
+    super('Google sync token expired');
+    this.name = 'GoogleSyncTokenExpiredError';
+  }
+}
+
+export class AppleObjectNotFoundError extends Error {
+  constructor(href: string) {
+    super(`Apple calendar object ${href} not found`);
+    this.name = 'AppleObjectNotFoundError';
+  }
+}
+
+/** The conditional write failed: the Apple resource changed since its ETag was read. */
+export class ApplePreconditionFailedError extends Error {
+  constructor(href: string) {
+    super(`Apple calendar object ${href} changed concurrently`);
+    this.name = 'ApplePreconditionFailedError';
+  }
+}

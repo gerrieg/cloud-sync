@@ -56,10 +56,12 @@ export interface PlannedAction {
   readonly ruleId: string;
   readonly uid: string;
   readonly summary: string;
-  /** Why an event is skipped: `unchanged`, `outside_window`, `matched_existing`, `invalid_calendar_data`. */
+  /** Why an event is skipped: `unchanged`, `outside_window`, `matched_existing`, `invalid_calendar_data`, `foreign_invitation`, `delete_guard`. */
   readonly reason?: string;
   /** The event was organized by someone other than the Profile's Apple ID. */
   readonly foreignInvitation?: boolean;
+  /** Set when the change is written to Apple instead of Google (bidirectional rules only). */
+  readonly direction?: 'google_to_apple';
 }
 
 export interface RuleRunResult {
@@ -68,6 +70,8 @@ export interface RuleRunResult {
   readonly status: 'ok' | 'skipped' | 'error';
   readonly reason?: string;
   readonly error?: string;
+  /** Set when the Delete Guard halted this run's deletions and queued them for approval. */
+  readonly deleteApprovalId?: string;
   readonly actions: readonly PlannedAction[];
 }
 

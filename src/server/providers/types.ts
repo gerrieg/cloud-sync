@@ -2,8 +2,11 @@ import type { AppleConnectionReport } from '../../shared/profile.js';
 import type {
   AppleCalendarInfo,
   AppleCalendarObject,
+  AppleObjectRef,
+  AppleObjectWrite,
   GoogleCalendarInfo,
   GoogleEvent,
+  GoogleEventChanges,
   GoogleEventDraft,
   GoogleWriteOptions,
 } from './calendar-types.js';
@@ -44,6 +47,16 @@ export interface SyncProviders {
       list(): Promise<AppleCalendarInfo[]>;
       /** All events of one calendar with their ETags. */
       listObjects(calendarUrl: string): Promise<AppleCalendarObject[]>;
+      /**
+       * Creates (`href` null) or conditionally overwrites a resource and returns its new identity.
+       * Throws ApplePreconditionFailedError when `etag` no longer matches.
+       */
+      putObject(calendarUrl: string, input: AppleObjectWrite): Promise<AppleObjectRef>;
+      /**
+       * Throws AppleObjectNotFoundError if the resource is gone and ApplePreconditionFailedError
+       * when `etag` no longer matches.
+       */
+      deleteObject(href: string, etag: string): Promise<void>;
     };
   };
   readonly google: {
@@ -57,6 +70,11 @@ export interface SyncProviders {
     readonly calendars: {
       list(): Promise<GoogleCalendarInfo[]>;
       listEvents(calendarId: string): Promise<GoogleEvent[]>;
+      /**
+       * Everything that changed since `syncToken`, or a full listing when it is null. Throws
+       * GoogleSyncTokenExpiredError when Google answers HTTP 410 Gone for a stale token.
+       */
+      listChanges(calendarId: string, syncToken: string | null): Promise<GoogleEventChanges>;
       /** With `recurringEventId` + `originalStartTime` this overrides that occurrence of the series. */
       insertEvent(
         calendarId: string,
