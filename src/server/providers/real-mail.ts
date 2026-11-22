@@ -224,12 +224,6 @@ export function createRealGoogleMail(
       }
       return { id: response.data.id, name };
     },
-    async findByMessageId(messageId) {
-      const response = await guarded((gmail) =>
-        gmail.users.messages.list({ userId: 'me', q: `rfc822msgid:${messageId}`, maxResults: 1 }),
-      );
-      return response.data.messages?.[0]?.id ?? null;
-    },
     async importMessage({ raw, labelIds }) {
       const response = await limitImports(() =>
         guarded((gmail) =>

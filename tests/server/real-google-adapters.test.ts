@@ -413,22 +413,6 @@ describe('the Gmail adapter', () => {
     });
   });
 
-  describe('finding a message by its Message-ID', () => {
-    it('searches the mailbox for the header value and returns the id of the hit', async () => {
-      const list = vi.fn().mockImplementation(() => respond({ messages: [{ id: 'm7', threadId: 't' }] }));
-      const mail = adapter({ messages: { list } });
-
-      expect(await mail.findByMessageId('abc@example.com')).toBe('m7');
-      expect(list.mock.calls[0]?.[0]).toMatchObject({ userId: 'me', q: 'rfc822msgid:abc@example.com', maxResults: 1 });
-    });
-
-    it('returns null when nothing matches', async () => {
-      const mail = adapter({ messages: { list: vi.fn().mockImplementation(() => respond({ resultSizeEstimate: 0 })) } });
-
-      expect(await mail.findByMessageId('abc@example.com')).toBeNull();
-    });
-  });
-
   it('reports a message that is gone from Gmail as missing, but only for a 404', async () => {
     const messages = {
       modify: vi.fn().mockRejectedValue(failure(404)),

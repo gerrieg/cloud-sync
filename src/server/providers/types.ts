@@ -159,11 +159,6 @@ export interface SyncProviders {
     readonly mail: {
       listLabels(): Promise<GoogleMailLabel[]>;
       createLabel(name: string): Promise<GoogleMailLabel>;
-      /**
-       * The id of a message whose `Message-ID` header is this (given without angle brackets), or
-       * null. Like Gmail's own search it does not look through Spam and Trash.
-       */
-      findByMessageId(messageId: string): Promise<string | null>;
       /** `messages.import` with `internalDateSource: 'dateHeader'`; returns the Gmail message id. */
       importMessage(input: GoogleMailImport): Promise<string>;
       /** Throws GoogleMessageNotFoundError if the message no longer exists. */

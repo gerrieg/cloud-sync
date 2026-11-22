@@ -15,7 +15,7 @@ import { mailRuleLabel } from './rule-labels.js';
 import { SyncLog } from './sync-log-store.js';
 import type { GuardedDeletion } from './delete-guard.js';
 import { carryOutPlan, heldAsSkipped, ignoringNotFound, runProfileWide, type PlanEntryOf } from './run-plan.js';
-import { MESSAGE_ID_KEY_PREFIX, messageKey } from './mail-key.js';
+import { messageKey } from './mail-key.js';
 import { listMailRules, type MailRuleRow } from './mail-rules-store.js';
 import {
   deleteMailFolderState,
@@ -31,7 +31,7 @@ import {
 } from './mail-store.js';
 
 const DAY_MS = 86_400_000;
-/** One run imports (or looks up in Gmail) at most this many messages, so a large backfill never turns into one endless request. */
+/** One run imports at most this many messages, so a large backfill never turns into one endless request. */
 const MAX_IMPORTS_PER_RUN = 100;
 
 export interface MailSyncOptions {
@@ -266,11 +266,6 @@ async function plan(
     return providers.google.mail.importMessage({ raw, labelIds: [...labelIds, ...flags.add] });
   }
 
-  /** Gmail's id for a message that is already there under this key; only a `Message-ID` can be searched for. */
-  async function findInGmail(key: string): Promise<string | null> {
-    return key.startsWith(MESSAGE_ID_KEY_PREFIX) ? providers.google.mail.findByMessageId(key.slice(MESSAGE_ID_KEY_PREFIX.length)) : null;
-  }
-
   for (const [key, copies] of presence) {
     const row = byKey.get(key);
     const first = copies[0]!;
@@ -282,32 +277,6 @@ async function plan(
       }
       imports += 1;
       const summary = subjects.get(key) ?? noSubject;
-      const existing = await findInGmail(key);
-      if (existing) {
-        // Initial Sync found the message in Gmail already: link it, never import it a second time
-        entries.push({
-          report: report('skip', key, summary, 'matched_existing'),
-          ruleId: first.rule.id,
-          apply: async () => {
-            const labelIds = await Promise.all(labelNames.map((name) => labels.ensure(name)));
-            const flags = flagLabels(first.seen, first.flagged);
-            await providers.google.mail.modify(existing, {
-              addLabelIds: [...labelIds, ...flags.add],
-              removeLabelIds: flags.remove,
-            });
-            insertSyncedEmail(db, {
-              profileId: profile.id,
-              messageIdKey: key,
-              summary,
-              googleMessageId: existing,
-              locations: JSON.stringify(locationsOf(copies)),
-              seen: first.seen,
-              flagged: first.flagged,
-            });
-          },
-        });
-        continue;
-      }
       entries.push({
         report: report('create', key, summary),
         ruleId: first.rule.id,

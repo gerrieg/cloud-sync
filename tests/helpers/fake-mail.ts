@@ -58,9 +58,6 @@ export class FakeMailWorld {
   readonly envelopeFetches: { path: string; uid: number }[] = [];
   readonly rawFetches: { path: string; uid: number }[] = [];
 
-  /** Every Message-ID the app looked up in Gmail before importing, in order. */
-  readonly messageIdLookups: string[] = [];
-
   /** Every `STATUS` request, in order, so tests can see which folders were polled. */
   readonly statusRequests: string[][] = [];
   /** Highest number of IDLE connections that were open at the same time, per Apple ID. */
@@ -219,14 +216,6 @@ export class FakeMailWorld {
     }));
   }
 
-  /** A message that was in Gmail before the app ever ran, e.g. imported by an earlier install. */
-  seedGmailMessage(refreshToken: string, raw: string, labelNames: string[] = []): string {
-    const account = this.account(refreshToken);
-    const id = `seed-${(this.counter += 1)}`;
-    account.messages.set(id, { raw: Buffer.from(raw), labelIds: new Set(labelNames.map((name) => this.labelId(account, name))) });
-    return id;
-  }
-
   gmailLabelNames(refreshToken: string): string[] {
     return [...this.account(refreshToken).labels.values()];
   }
@@ -372,18 +361,6 @@ export class FakeMailWorld {
         labels.set(id, name);
         this.googleWrites.push({ kind: 'createLabel', id });
         return { id, name };
-      },
-      findByMessageId: async (messageId) => {
-        this.messageIdLookups.push(messageId);
-        const wanted = messageId.toLowerCase();
-        for (const [id, found] of account().messages) {
-          // Like Gmail's own search, Spam and Trash are not looked through
-          const held = header(found.raw, 'Message-ID')?.replace(/^<|>$/g, '').trim().toLowerCase();
-          if (held === wanted && !found.labelIds.has('TRASH') && !found.labelIds.has('SPAM')) {
-            return id;
-          }
-        }
-        return null;
       },
       importMessage: async ({ raw, labelIds }) => {
         const failure = this.importFailures.find(({ match }) => raw.toString('utf8').includes(match));
