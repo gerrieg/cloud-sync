@@ -16,6 +16,8 @@ export interface TranslatedCalendarObject {
   readonly master: GoogleEventDraft;
   /** Overridden occurrences of a recurring series (iCal RECURRENCE-ID). */
   readonly exceptions: readonly GoogleEventDraft[];
+  /** The overridden start of each exception, same order, normalized like `matchStart`. */
+  readonly exceptionMatchStarts: readonly string[];
   readonly foreignInvitation: boolean;
   /** End of the last occurrence in epoch ms, or null when the series never ends. */
   readonly lastEndMs: number | null;
@@ -176,6 +178,7 @@ export function translateIcs(ics: string, options: TranslateOptions): Translated
     uid: masterEvent.uid,
     master: standalone,
     exceptions: overrides.map((vevent) => buildDraft(vevent, options)),
+    exceptionMatchStarts: overrides.map((vevent) => matchStartOf(new ICAL.Event(vevent).recurrenceId)),
     foreignInvitation: isForeign(master, options.appleId),
     lastEndMs: lastEndMs(master),
     matchStart: matchStartOf(masterEvent.startDate),

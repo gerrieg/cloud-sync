@@ -188,6 +188,65 @@ describe('One-way calendar sync HTTP seam', () => {
   });
 
   describe('Initial Sync matching', () => {
+    const SERIES_UID = '4F6C2B1A-0004-4B1E-9A11-DDDDDDDDDDDD';
+    const BERLIN = 'Europe/Berlin';
+    /** The Teamrunde series as Google holds it after an earlier install: master plus one moved occurrence. */
+    function seedSeries(world: Awaited<ReturnType<typeof setup>>['world'], options: { withException: boolean }) {
+      const master = world.seedGoogleEvent(GOOGLE_REFRESH_TOKEN, 'primary', {
+        summary: 'Teamrunde',
+        start: { dateTime: '2026-03-03T10:00:00+01:00', timeZone: BERLIN },
+        end: { dateTime: '2026-03-03T11:00:00+01:00', timeZone: BERLIN },
+        recurrence: ['RRULE:FREQ=WEEKLY;BYDAY=TU', 'EXDATE;TZID=Europe/Berlin:20260317T100000'],
+        iCalUID: SERIES_UID,
+      });
+      const exception = options.withException
+        ? world.seedGoogleEvent(GOOGLE_REFRESH_TOKEN, 'primary', {
+            summary: 'Teamrunde (verschoben)',
+            start: { dateTime: '2026-03-24T14:00:00+01:00', timeZone: BERLIN },
+            end: { dateTime: '2026-03-24T15:00:00+01:00', timeZone: BERLIN },
+            recurringEventId: master.id,
+            originalStartTime: { dateTime: '2026-03-24T10:00:00+01:00', timeZone: BERLIN },
+            iCalUID: SERIES_UID,
+          })
+        : null;
+      return { master, exception };
+    }
+    const seriesIcs = () => icsFixture('recurring-with-exception.ics');
+
+    it('keeps the overridden occurrences Google already holds for an adopted series, so a later change updates them in place', async () => {
+      const { api, world, profile } = await setup();
+      const { master, exception } = seedSeries(world, { withException: true });
+      world.putAppleEvent(APPLE_ID, HOME, 'teamrunde.ics', seriesIcs());
+
+      const adopted = (await (await sync(api, profile)).json()) as SyncRunResult;
+      expect(adopted.rules[0].actions.map((a) => [a.action, a.reason])).toEqual([['skip', 'matched_existing']]);
+      const writesAfterAdopting = world.writes.length;
+
+      world.putAppleEvent(APPLE_ID, HOME, 'teamrunde.ics', seriesIcs().replace('SUMMARY:Teamrunde\r', 'SUMMARY:Teamrunde neu\r'));
+      await sync(api, profile);
+
+      expect(world.writes.slice(writesAfterAdopting).map((w) => w.kind)).not.toContain('insert');
+      const events = googleEvents(world);
+      expect(events.map((e) => e.id)).toEqual([master.id, exception!.id]);
+      expect(events[0].summary).toBe('Teamrunde neu');
+    });
+
+    it('still creates an overridden occurrence Google lacks, exactly once', async () => {
+      const { api, world, profile } = await setup();
+      const { master } = seedSeries(world, { withException: false });
+      world.putAppleEvent(APPLE_ID, HOME, 'teamrunde.ics', seriesIcs());
+      await sync(api, profile);
+
+      world.putAppleEvent(APPLE_ID, HOME, 'teamrunde.ics', seriesIcs().replace('SUMMARY:Teamrunde\r', 'SUMMARY:Teamrunde neu\r'));
+      await sync(api, profile);
+      world.putAppleEvent(APPLE_ID, HOME, 'teamrunde.ics', seriesIcs().replace('SUMMARY:Teamrunde\r', 'SUMMARY:Teamrunde neuer\r'));
+      await sync(api, profile);
+
+      const events = googleEvents(world);
+      expect(events).toHaveLength(2);
+      expect(events[1]).toMatchObject({ recurringEventId: master.id, summary: 'Teamrunde (verschoben)' });
+    });
+
     it('adopts pre-existing Google events by iCal UID or by normalized title + start, and never deletes unmatched ones', async () => {
       const { api, world, profile } = await setup();
       const byUid = world.seedGoogleEvent(GOOGLE_REFRESH_TOKEN, 'primary', {
