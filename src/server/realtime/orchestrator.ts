@@ -443,9 +443,7 @@ export class RealtimeOrchestrator {
         runtime.calendarCtags.delete(url);
       }
     }
-    const unseen = calendarUrls.some((url) => !runtime.calendarCtags.has(url));
-    const waiting = runtime.lastCtagPollAt !== null && now - runtime.lastCtagPollAt < CTAG_POLL_INTERVAL_MS;
-    if (calendarUrls.length === 0 || (waiting && !unseen)) {
+    if (calendarUrls.length === 0 || (runtime.lastCtagPollAt !== null && now - runtime.lastCtagPollAt < CTAG_POLL_INTERVAL_MS)) {
       return;
     }
     runtime.lastCtagPollAt = now;
