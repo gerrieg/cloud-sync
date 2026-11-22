@@ -18,6 +18,7 @@ import {
   type SyncProvidersFactory,
 } from '../providers/types.js';
 import { pruneSyncLogs } from '../sync/log-retention.js';
+import { pruneSyncRuns } from '../sync/sync-run-store.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
 import { pollingTargetsOf } from '../sync/polling-targets.js';
 import { flagGoogleReauth, ProfileRunner } from '../sync/profile-runner.js';
@@ -135,7 +136,7 @@ export class RealtimeOrchestrator {
     await Promise.all(profiles.map((profile) => this.tickProfile(profile)));
   }
 
-  /** The sync log is trimmed right at start-up and then once a day. */
+  /** The sync log and the run history are trimmed right at start-up and then once a day. */
   private pruneLogsWhenDue(): void {
     const now = this.deps.clock.now();
     if (this.lastLogPruneAt !== null && now - this.lastLogPruneAt < LOG_PRUNE_INTERVAL_MS) {
@@ -144,6 +145,7 @@ export class RealtimeOrchestrator {
     this.lastLogPruneAt = now;
     try {
       pruneSyncLogs(this.deps.db, this.deps.clock);
+      pruneSyncRuns(this.deps.db, this.deps.clock);
     } catch (error) {
       console.error('Pruning the sync log failed:', error);
     }

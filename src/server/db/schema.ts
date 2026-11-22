@@ -235,6 +235,26 @@ export const syncLogs = sqliteTable(
   (table) => [index('sync_logs_profile_created_idx').on(table.profileId, table.createdAt)],
 );
 
+/** One finished run of one kind of data of a Profile (not recorded for dry runs), for the Overview. */
+export const syncRuns = sqliteTable(
+  'sync_runs',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    domain: text('domain', { enum: ['calendars', 'contacts', 'mail'] }).notNull(),
+    startedAt: integer('started_at').notNull(),
+    durationMs: integer('duration_ms').notNull(),
+    /** `skipped`: nothing to do (e.g. no change since the last run); `error`: at least one rule or item failed. */
+    status: text('status', { enum: ['ok', 'skipped', 'error'] }).notNull(),
+    created: integer('created').notNull(),
+    updated: integer('updated').notNull(),
+    deleted: integer('deleted').notNull(),
+  },
+  (table) => [index('sync_runs_profile_domain_started_idx').on(table.profileId, table.domain, table.startedAt)],
+);
+
 export const pendingDeleteApprovals = sqliteTable('pending_delete_approvals', {
   id: text('id').primaryKey(),
   profileId: text('profile_id')

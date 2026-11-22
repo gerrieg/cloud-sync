@@ -102,6 +102,58 @@ describe('overview and Sync All', () => {
     });
   });
 
+  describe('per kind of data: rules, linked items and the runs', () => {
+    it('shows what is enabled, what the last run carried over and the totals of the last 24 hours', async () => {
+      const s = await household();
+      await s.syncAll();
+      await s.ctx.realtime.settled();
+
+      const [anna, , cora] = await s.overview();
+
+      expect(anna!.domains.map((d) => d.domain)).toEqual(['calendars', 'contacts', 'mail']);
+      expect(anna!.domains[0]).toMatchObject({
+        rulesEnabled: 1,
+        rulesTotal: 1,
+        direction: s.rule.direction,
+        tracked: 1,
+        running: false,
+        lastRun: { at: s.ctx.clock.now(), status: 'ok', created: 1, updated: 0, deleted: 0 },
+        last24h: { runs: 1, failedRuns: 0, created: 1, updated: 0, deleted: 0 },
+      });
+      // No contact or mail rule: nothing enabled, nothing ran
+      expect(anna!.domains[1]).toMatchObject({ rulesEnabled: 0, rulesTotal: 0, direction: null, tracked: 0, lastRun: null });
+      expect(anna!.domains[2]).toMatchObject({ rulesTotal: 0, lastRun: null, last24h: { runs: 0 } });
+      expect(cora!.domains.every((d) => d.lastRun === null)).toBe(true);
+    });
+
+    it('records a failed run, and ages runs out of the 24 hour totals but keeps the last run', async () => {
+      const s = await household();
+      await s.syncAll();
+      await s.ctx.realtime.settled();
+      s.ctx.clock.advanceMinutes(10);
+      s.world.putAppleEvent(APPLE_ID, HOME, 'c.ics', simpleIcs('uid-c', 'Neu', 3));
+      s.world.failNextGoogleWrite(GOOGLE_REFRESH_TOKEN, new Error('Google is down'));
+      await s.sync();
+
+      const failed = (await s.overview())[0]!.domains[0]!;
+      expect(failed.lastRun).toMatchObject({ status: 'error', created: 0 });
+      expect(failed.last24h).toMatchObject({ runs: 2, failedRuns: 1, created: 1 });
+
+      s.ctx.clock.advanceMinutes(25 * 60);
+      const aged = (await s.overview())[0]!.domains[0]!;
+      expect(aged.lastRun).toMatchObject({ status: 'error' });
+      expect(aged.last24h).toMatchObject({ runs: 0, failedRuns: 0, created: 0 });
+    });
+
+    it('records no run for a dry run', async () => {
+      const s = await household();
+
+      await s.api.request(`/api/profiles/${s.profile.id}/dry-run`, { method: 'POST', body: {} });
+
+      expect((await s.overview())[0]!.domains[0]!.lastRun).toBeNull();
+    });
+  });
+
   describe('what counts as a successful sync', () => {
     /** Anna with a calendar rule (fine) and an INBOX mail rule (one message Gmail will reject). */
     async function calendarAndMail() {

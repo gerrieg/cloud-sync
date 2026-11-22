@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/client/App.js';
-import { installBackend, json, logEntry, profile, type LogFixture, type RecordedCall } from '../helpers/client-backend.js';
+import { installBackend, json, logEntry, overviewDomains, profile, type LogFixture, type RecordedCall } from '../helpers/client-backend.js';
 
 vi.mock('../../src/client/lib/navigation.js', () => ({ redirectTo: vi.fn() }));
 
@@ -31,11 +31,13 @@ describe('Observability UI (fetch boundary)', () => {
               {
                 profile: profile({ id: 'a', name: 'Anna', lastSyncAt: SYNCED_AT + 60_000, lastSuccessfulSyncAt: SYNCED_AT, lastSyncStatus: 'error' }),
                 status: { mailIdle: 'connected', googleCalendar: 'webhook' },
+                domains: overviewDomains(),
                 openErrors: 2,
               },
               {
                 profile: profile({ id: 'b', name: 'Ben', enabled: false }),
                 status: { mailIdle: 'paused', googleCalendar: 'inactive' },
+                domains: overviewDomains(),
                 openErrors: 0,
               },
             ])
@@ -56,6 +58,81 @@ describe('Observability UI (fetch boundary)', () => {
       expect(ben.getByText(/last successful sync: never/i)).toBeInTheDocument();
       expect(ben.getByText('Mail IDLE: paused')).toBeInTheDocument();
       expect(ben.getByText('Paused')).toBeInTheDocument();
+    });
+
+    it('shows per kind of data what is enabled, how the last run went and what the last 24 hours carried over', async () => {
+      const now = Date.now();
+      const run = { at: now - 3 * 60_000, durationMs: 1_400, status: 'ok' as const, created: 2, updated: 5, deleted: 0 };
+      installBackend([profile({ id: 'a', name: 'Anna' })], (call) =>
+        call.path === '/api/overview'
+          ? json([
+              {
+                profile: profile({ id: 'a', name: 'Anna', lastSuccessfulSyncAt: now - 3 * 60_000 }),
+                status: { mailIdle: 'connected', googleCalendar: 'webhook' },
+                openErrors: 0,
+                domains: overviewDomains({
+                  calendars: { rulesEnabled: 2, rulesTotal: 3, direction: 'bidirectional', tracked: 340, lastRun: run, last24h: { runs: 40, failedRuns: 0, created: 7, updated: 12, deleted: 1 } },
+                  contacts: { rulesEnabled: 1, rulesTotal: 1, direction: 'one_way', tracked: 141, lastRun: { ...run, status: 'skipped', durationMs: 120_000 }, last24h: { runs: 700, failedRuns: 2, created: 0, updated: 0, deleted: 0 } },
+                  mail: { rulesEnabled: 1, rulesTotal: 1, direction: 'one_way', tracked: 2300, running: true },
+                }),
+              },
+            ])
+          : undefined,
+      );
+      render(<App />);
+
+      const anna = within(await screen.findByRole('article', { name: 'Anna' }));
+      const calendars = within(anna.getByRole('region', { name: 'Calendars' }));
+      expect(calendars.getByText('2/3 rules on')).toBeInTheDocument();
+      expect(calendars.getByLabelText('both ways')).toBeInTheDocument();
+      expect(calendars.getByText('340 linked')).toBeInTheDocument();
+      expect(calendars.getByLabelText('2 created, 5 updated, 0 deleted')).toBeInTheDocument();
+      expect(calendars.getByText(/took 1\.4 s/)).toBeInTheDocument();
+      expect(calendars.getByText('3 min ago')).toBeInTheDocument();
+      expect(calendars.getByLabelText('7 created, 12 updated, 1 deleted')).toBeInTheDocument();
+
+      const contacts = within(anna.getByRole('region', { name: 'Contacts' }));
+      expect(contacts.getByText('no changes')).toBeInTheDocument();
+      expect(contacts.getByText(/took 2 min 0 s/)).toBeInTheDocument();
+      expect(contacts.getByText('2 failed runs')).toBeInTheDocument();
+
+      const mail = within(anna.getByRole('region', { name: 'Mail' }));
+      expect(mail.getByRole('status')).toHaveTextContent('Syncing…');
+    });
+
+    it('marks a failed run, an empty kind of data and a paused Profile', async () => {
+      const now = Date.now();
+      installBackend([profile({ id: 'a', name: 'Anna' })], (call) =>
+        call.path === '/api/overview'
+          ? json([
+              {
+                profile: profile({ id: 'a', name: 'Anna' }),
+                status: { mailIdle: 'connected', googleCalendar: 'webhook' },
+                openErrors: 1,
+                domains: overviewDomains({
+                  calendars: { rulesEnabled: 1, rulesTotal: 1, direction: 'one_way', lastRun: { at: now, durationMs: 800, status: 'error', created: 0, updated: 0, deleted: 0 } },
+                  contacts: { rulesEnabled: 0, rulesTotal: 2 },
+                }),
+              },
+              {
+                profile: profile({ id: 'b', name: 'Ben', enabled: false }),
+                status: { mailIdle: 'paused', googleCalendar: 'inactive' },
+                openErrors: 0,
+                domains: overviewDomains({ calendars: { rulesEnabled: 1, rulesTotal: 1, direction: 'one_way' } }),
+              },
+            ])
+          : undefined,
+      );
+      render(<App />);
+
+      const anna = within(await screen.findByRole('article', { name: 'Anna' }));
+      expect(within(anna.getByRole('region', { name: 'Calendars' })).getByText('failed')).toBeInTheDocument();
+      expect(within(anna.getByRole('region', { name: 'Contacts' })).getByText('0/2 rules on')).toBeInTheDocument();
+      expect(within(anna.getByRole('region', { name: 'Mail' })).getByText('no rules')).toBeInTheDocument();
+
+      const ben = within(screen.getByRole('article', { name: 'Ben' }));
+      expect(within(ben.getByRole('region', { name: 'Calendars' })).getByText('paused')).toBeInTheDocument();
+      expect(within(ben.getByRole('region', { name: 'Calendars' })).getByText('Not syncing')).toBeInTheDocument();
     });
 
     it('queues a sync for all Profiles from "Sync All" and says how many', async () => {

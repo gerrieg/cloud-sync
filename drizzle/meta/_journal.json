@@ -78,6 +78,13 @@
       "when": 1795350272800,
       "tag": "0010_goofy_jackal",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795352298247,
+      "tag": "0011_light_spiral",
+      "breakpoints": true
     }
   ]
 }

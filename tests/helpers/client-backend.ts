@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { DomainOverviewDto, OverviewDomain } from '../../src/shared/profile.js';
 
 export interface ProfileFixture {
   id: string;
@@ -25,6 +26,21 @@ export function profile(overrides: Partial<ProfileFixture> & { id: string; name:
     lastSuccessfulSyncAt: null,
     ...overrides,
   };
+}
+
+/** The three kinds of data of an Overview card; by default no rules and no runs. */
+export function overviewDomains(overrides: Partial<Record<OverviewDomain, Partial<DomainOverviewDto>>> = {}): DomainOverviewDto[] {
+  return (['calendars', 'contacts', 'mail'] as const).map((domain) => ({
+    domain,
+    rulesEnabled: 0,
+    rulesTotal: 0,
+    direction: null,
+    tracked: 0,
+    running: false,
+    lastRun: null,
+    last24h: { runs: 0, failedRuns: 0, created: 0, updated: 0, deleted: 0 },
+    ...overrides[domain],
+  }));
 }
 
 export function json(body: unknown, status = 200): Response {
@@ -74,7 +90,12 @@ export function installBackend(initial: ProfileFixture[], extra?: (call: Recorde
 
     if (method === 'GET' && path === '/api/overview') {
       return json(
-        profiles.map((p) => ({ profile: p, status: { mailIdle: 'disconnected', googleCalendar: 'inactive' }, openErrors: 0 })),
+        profiles.map((p) => ({
+          profile: p,
+          status: { mailIdle: 'disconnected', googleCalendar: 'inactive' },
+          domains: overviewDomains(),
+          openErrors: 0,
+        })),
       );
     }
     if (method === 'GET' && path.startsWith('/api/logs')) return json([]);

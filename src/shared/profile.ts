@@ -30,10 +30,47 @@ export interface ProfileStatusDto {
   readonly googleCalendar: GoogleCalendarMode;
 }
 
+export type OverviewDomain = 'calendars' | 'contacts' | 'mail';
+
+/** What one finished sync run of a kind of data did. */
+export interface RunSummaryDto {
+  readonly at: number;
+  readonly durationMs: number;
+  /** `skipped`: nothing to do (e.g. no change since the last run); `error`: at least one rule or item failed. */
+  readonly status: 'ok' | 'skipped' | 'error';
+  readonly created: number;
+  readonly updated: number;
+  readonly deleted: number;
+}
+
+/** One kind of data (calendars, contacts or mail) of a Profile on the overview page. */
+export interface DomainOverviewDto {
+  readonly domain: OverviewDomain;
+  readonly rulesEnabled: number;
+  readonly rulesTotal: number;
+  /** Of the enabled rules; `mixed` when both kinds are enabled; null without an enabled rule. */
+  readonly direction: 'one_way' | 'bidirectional' | 'mixed' | null;
+  /** Events, contacts or messages that are linked between Apple and Google right now. */
+  readonly tracked: number;
+  /** A run of this kind of data is in progress. */
+  readonly running: boolean;
+  readonly lastRun: RunSummaryDto | null;
+  /** Totals of the runs of the last 24 hours. */
+  readonly last24h: {
+    readonly runs: number;
+    readonly failedRuns: number;
+    readonly created: number;
+    readonly updated: number;
+    readonly deleted: number;
+  };
+}
+
 /** One Profile card of the overview page: `GET /api/overview`. */
 export interface ProfileOverviewDto {
   readonly profile: ProfileDto;
   readonly status: ProfileStatusDto;
+  /** Always calendars, contacts and mail, in that order. */
+  readonly domains: readonly DomainOverviewDto[];
   /** Errors in the sync log that no later run has resolved yet. */
   readonly openErrors: number;
 }

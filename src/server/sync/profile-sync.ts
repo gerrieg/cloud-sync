@@ -6,6 +6,7 @@ import type { SyncProviders } from '../providers/types.js';
 import { runCalendarSync } from './calendar-sync.js';
 import { runContactSync } from './contact-sync.js';
 import { runMailSync } from './mail-sync.js';
+import { markRunning, recordRun, summarizeOutcomes, type RunOutcome } from './sync-run-store.js';
 
 /** `domain` narrows a run to one kind of data; `all` syncs everything. */
 export type SyncDomain = 'all' | 'calendars' | 'contacts' | 'mail';
@@ -28,11 +29,37 @@ export interface ProfileSyncOptions {
 export async function runProfileSync(options: ProfileSyncOptions): Promise<SyncRunResult> {
   const { db, clock, profile, appleId, providers, domain, dryRun, force, ruleId } = options;
   const covers = (part: Exclude<SyncDomain, 'all'>) => domain === 'all' || domain === part;
+  /** Times a part of the run for the Overview; a dry run changes nothing and leaves no trace there. */
+  async function tracked<T>(part: Exclude<SyncDomain, 'all'>, work: () => Promise<T>, outcomes: (result: T) => readonly (RunOutcome & { reason?: string })[]): Promise<T> {
+    if (dryRun) {
+      return work();
+    }
+    const startedAt = clock.now();
+    const finished = markRunning(profile.id, part);
+    try {
+      const result = await work();
+      const outcome = summarizeOutcomes(outcomes(result));
+      if (outcome) {
+        recordRun(db, profile.id, part, startedAt, clock.now() - startedAt, outcome);
+      }
+      return result;
+    } finally {
+      finished();
+    }
+  }
   const calendars = covers('calendars')
-    ? await runCalendarSync({ db, clock, profile, appleId, providers, dryRun, force, ...(ruleId !== undefined ? { ruleId } : {}) })
+    ? await tracked(
+        'calendars',
+        () => runCalendarSync({ db, clock, profile, appleId, providers, dryRun, force, ...(ruleId !== undefined ? { ruleId } : {}) }),
+        (result) => result.rules,
+      )
     : { dryRun, rules: [] };
-  const contacts = covers('contacts') ? await runContactSync({ db, clock, profile, providers, dryRun, force }) : null;
-  const mail = covers('mail') ? await runMailSync({ db, clock, profile, providers, dryRun, force }) : null;
+  const contacts = covers('contacts')
+    ? await tracked('contacts', () => runContactSync({ db, clock, profile, providers, dryRun, force }), (result) => (result ? [result] : []))
+    : null;
+  const mail = covers('mail')
+    ? await tracked('mail', () => runMailSync({ db, clock, profile, providers, dryRun, force }), (result) => (result ? [result] : []))
+    : null;
   if (!dryRun) {
     const runFailed =
       calendars.rules.some((rule) => rule.status === 'error') || contacts?.status === 'error' || mail?.status === 'error';
