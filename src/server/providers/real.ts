@@ -12,6 +12,7 @@ import {
   createRealAppleMail,
   createRealGoogleMail,
 } from './real-mail.js';
+import { createGoogleThrottle } from './google-throttle.js';
 import { createRateLimiter } from './rate-limiter.js';
 import {
   GOOGLE_INVALID_GRANT,
@@ -122,6 +123,16 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
       return limiter;
     };
   };
+  // Calendar calls of a Profile queue behind one adaptive throttle that also repeats rate-limited calls
+  const calendarThrottles = new Map<string, ReturnType<typeof createGoogleThrottle>>();
+  const calendarThrottleFor = (profileId: string) => {
+    let throttle = calendarThrottles.get(profileId);
+    if (!throttle) {
+      throttle = createGoogleThrottle();
+      calendarThrottles.set(profileId, throttle);
+    }
+    return throttle;
+  };
   const peopleLimiterFor = limiterPool(PEOPLE_API_MIN_INTERVAL_MS);
   const gmailImportLimiterFor = limiterPool(GMAIL_IMPORT_MIN_INTERVAL_MS);
 
@@ -145,7 +156,7 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
       mail: createRealAppleMail(context.apple),
     },
     google: {
-      calendars: createRealGoogleCalendars(config, context.googleTokens),
+      calendars: createRealGoogleCalendars(config, context.googleTokens, calendarThrottleFor(context.profileId)),
       contacts: createRealGoogleContacts(config, context.googleTokens, peopleLimiterFor(context.profileId)),
       mail: createRealGoogleMail(config, context.googleTokens, gmailImportLimiterFor(context.profileId)),
       buildAuthUrl({ redirectUri, state }) {

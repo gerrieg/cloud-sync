@@ -3,7 +3,7 @@ export interface RateLimiterClock {
   sleep(ms: number): Promise<void>;
 }
 
-const systemTime: RateLimiterClock = {
+export const systemTime: RateLimiterClock = {
   now: () => Date.now(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };

@@ -23,6 +23,33 @@ export function isExpiredSyncToken(error: unknown): boolean {
   );
 }
 
+const RATE_LIMIT_REASONS = new Set(['rateLimitExceeded', 'userRateLimitExceeded']);
+
+/**
+ * Google says "slow down": HTTP 429, or a 403 whose reason is `rateLimitExceeded` / `userRateLimitExceeded`
+ * (message "Rate Limit Exceeded"). The request was not carried out, so it is safe to repeat after a wait.
+ * `quotaExceeded` (usage limits of the day) is no such case: waiting a minute does not help.
+ */
+export function isRateLimited(error: unknown): boolean {
+  const status = httpStatus(error);
+  if (status === 429) {
+    return true;
+  }
+  if (status !== 403) {
+    return false;
+  }
+  const failure = error as {
+    message?: unknown;
+    errors?: { reason?: unknown }[];
+    response?: { data?: { error?: { errors?: { reason?: unknown }[] } } };
+  };
+  const reasons = [...(failure.errors ?? []), ...(failure.response?.data?.error?.errors ?? [])].map((e) => e.reason);
+  return (
+    reasons.some((reason) => typeof reason === 'string' && RATE_LIMIT_REASONS.has(reason)) ||
+    (typeof failure.message === 'string' && /rate limit exceeded/i.test(failure.message))
+  );
+}
+
 /** Google refuses the stored authorization (or the code to get one): it is dead and must be renewed. */
 export function isInvalidGrant(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) {

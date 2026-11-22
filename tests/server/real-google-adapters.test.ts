@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GoogleEventNotFoundError, GoogleSyncTokenExpiredError, type GoogleEventDraft } from '../../src/server/providers/calendar-types.js';
 import { GoogleContactNotFoundError } from '../../src/server/providers/contact-types.js';
 import { GoogleMessageNotFoundError } from '../../src/server/providers/mail-types.js';
+import { createGoogleThrottle } from '../../src/server/providers/google-throttle.js';
 import { createRealGoogleCalendars } from '../../src/server/providers/real-calendar.js';
 import { createRealGoogleContacts } from '../../src/server/providers/real-contacts.js';
 import { createRealGoogleMail } from '../../src/server/providers/real-mail.js';
@@ -35,7 +36,7 @@ describe('the Google Calendar adapter', () => {
 
   /** `events` stands for the part of the Google client the adapter talks to. */
   function adapter(events: Partial<Record<'list' | 'insert' | 'update' | 'delete' | 'instances' | 'watch', ReturnType<typeof vi.fn>>>, extra: object = {}) {
-    return createRealGoogleCalendars(config, tokens, () => ({ events, ...extra }) as unknown as calendar_v3.Calendar);
+    return createRealGoogleCalendars(config, tokens, none, () => ({ events, ...extra }) as unknown as calendar_v3.Calendar);
   }
 
   it('lists the calendars with their names, primary flag and whether they can be written', async () => {
@@ -197,8 +198,24 @@ describe('the Google Calendar adapter', () => {
     });
   });
 
+  it('repeats a write that Google rate-limits instead of failing it, and does not repeat other errors', async () => {
+    const insert = vi
+      .fn()
+      .mockImplementationOnce(() => Promise.reject(failure(403, { error: { errors: [{ reason: 'rateLimitExceeded' }] } })))
+      .mockImplementationOnce(() => respond({ id: 'g1', summary: 'Termin' }));
+    const throttle = createGoogleThrottle({}, { now: () => 0, sleep: async () => undefined }, () => 0);
+    const calendars = createRealGoogleCalendars(config, tokens, throttle, () => ({ events: { insert } }) as unknown as calendar_v3.Calendar);
+
+    expect((await calendars.insertEvent('primary', draft, options)).id).toBe('g1');
+    expect(insert).toHaveBeenCalledTimes(2);
+
+    insert.mockReset().mockImplementation(() => Promise.reject(failure(403, { error: { errors: [{ reason: 'forbidden' }] } })));
+    await expect(calendars.insertEvent('primary', draft, options)).rejects.toMatchObject({ response: { status: 403 } });
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+
   it('needs a connected Google account when it is not handed a client', async () => {
-    await expect(createRealGoogleCalendars(config, null).list()).rejects.toThrow('Google account is not connected');
+    await expect(createRealGoogleCalendars(config, null, none).list()).rejects.toThrow('Google account is not connected');
   });
 });
 
