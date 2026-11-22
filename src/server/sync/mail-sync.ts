@@ -10,10 +10,11 @@ import {
   type AppleMailListing,
   type AppleMailMessage,
 } from '../providers/mail-types.js';
-import { GoogleAuthError, type SyncProviders } from '../providers/types.js';
+import type { SyncProviders } from '../providers/types.js';
 import { mailRuleLabel } from './rule-labels.js';
 import { SyncLog } from './sync-log-store.js';
-import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
+import type { GuardedDeletion } from './delete-guard.js';
+import { carryOutPlan, failedRun, ignoringNotFound, type PlanEntryOf } from './run-plan.js';
 import { messageKey } from './mail-key.js';
 import { listMailRules, type MailRuleRow } from './mail-rules-store.js';
 import {
@@ -54,10 +55,7 @@ export interface MailDeletion extends GuardedDeletion {
   readonly behavior: MailDeleteBehavior;
 }
 
-interface PlanEntry {
-  readonly report: PlannedMailAction;
-  readonly apply?: () => Promise<void>;
-  readonly deletion?: MailDeletion;
+interface PlanEntry extends PlanEntryOf<PlannedMailAction, MailDeletion> {
   /** The rule of the folder the message sits in, for the sync log; absent when not attributable. */
   readonly ruleId?: string;
 }
@@ -80,14 +78,8 @@ interface FolderRead {
 
 const noSubject = '(no subject)';
 
-async function ignoreGmailNotFound(work: () => Promise<unknown>): Promise<void> {
-  try {
-    await work();
-  } catch (error) {
-    if (!(error instanceof GoogleMessageNotFoundError)) {
-      throw error;
-    }
-  }
+function ignoreGmailNotFound(work: () => Promise<unknown>): Promise<void> {
+  return ignoringNotFound(GoogleMessageNotFoundError, work);
 }
 
 /** Resolves Gmail label names to ids, creating missing custom labels only when asked to. */
@@ -492,57 +484,33 @@ async function run(options: MailSyncOptions): Promise<MailRunResult | null> {
   }
 
   const rows = listSyncedEmails(db, profile.id);
-  const guarded = holdBackDeletions(
-    await plan(options, rules, reads, rows, trash),
-    rows.length,
-    (_entry, deletion): PlanEntry => ({
+  return carryOutPlan({
+    db,
+    clock,
+    profileId: profile.id,
+    log,
+    dryRun: options.dryRun,
+    entries: await plan(options, rules, reads, rows, trash),
+    trackedItems: rows.length,
+    held: (_entry, deletion): PlanEntry => ({
       report: { action: 'skip', uid: deletion.uid, summary: deletion.summary, reason: 'delete_guard' },
     }),
-  );
-
-  if (options.dryRun) {
-    return { status: 'ok', actions: guarded.entries.map((entry) => entry.report) };
-  }
-  const deleteApprovalId =
-    guarded.batch.length > 0
-      ? queueDeletions(db, { profileId: profile.id, domain: 'mail', ruleId: null, items: guarded.batch, now: clock.now() }).id
-      : undefined;
-  const withApproval = deleteApprovalId ? { deleteApprovalId } : {};
-  for (const rule of [...enabled, null]) {
-    log.runRecovered(rule?.id ?? null);
-  }
-
-  // One message that cannot be carried over (say, Gmail rejects it) must not hold up all the others
-  const applied: PlannedMailAction[] = [];
-  let failure: string | null = null;
-  for (const entry of guarded.entries) {
-    try {
-      await entry.apply?.();
-      applied.push(entry.report);
-      log.applied(entry.ruleId ?? null, entry.report);
-    } catch (error) {
-      if (error instanceof GoogleAuthError) {
-        throw error;
+    domain: 'mail',
+    approvalRuleId: null,
+    recovered: [...enabled.map((rule) => rule.id), null],
+    logRuleId: (entry) => entry.ruleId ?? null,
+    commit: () => {
+      for (const read of reads) {
+        setMailFolderState(db, profile.id, read.rule.appleFolderPath, { uidValidity: read.listing.uidValidity, lastUid: 0 });
       }
-      failure ??= error instanceof Error ? error.message : 'Sync failed';
-      log.failed(entry.ruleId ?? null, entry.report, error);
-    }
-  }
-  if (failure !== null) {
-    // The folder cursors stay put so the next run tries the failed ones again
-    return { status: 'error', error: failure, ...withApproval, actions: applied };
-  }
-
-  for (const read of reads) {
-    setMailFolderState(db, profile.id, read.rule.appleFolderPath, { uidValidity: read.listing.uidValidity, lastUid: 0 });
-  }
-  if (trash) {
-    setMailFolderState(db, profile.id, trash.path, {
-      uidValidity: trash.listing.uidValidity,
-      lastUid: Math.max(0, ...trash.listing.messages.map((message) => message.uid)),
-    });
-  }
-  return { status: 'ok', ...withApproval, actions: applied };
+      if (trash) {
+        setMailFolderState(db, profile.id, trash.path, {
+          uidValidity: trash.listing.uidValidity,
+          lastUid: Math.max(0, ...trash.listing.messages.map((message) => message.uid)),
+        });
+      }
+    },
+  });
 }
 
 /** Plans (and, unless `dryRun`, applies) the profile-wide mail sync; null when there are no mail rules. */
@@ -550,13 +518,9 @@ export async function runMailSync(options: MailSyncOptions): Promise<MailRunResu
   try {
     return await run(options);
   } catch (error) {
-    if (error instanceof GoogleAuthError) {
-      throw error;
-    }
-    if (!options.dryRun) {
-      new SyncLog(options.db, options.clock, options.profile.id, 'email').runFailed(null, 'Mail sync', error);
-    }
-    return { status: 'error', error: error instanceof Error ? error.message : 'Sync failed', actions: [] };
+    const log = new SyncLog(options.db, options.clock, options.profile.id, 'email');
+    const message = failedRun({ log, dryRun: options.dryRun, ruleId: null, summary: 'Mail sync' }, error);
+    return { status: 'error', error: message, actions: [] };
   }
 }
 

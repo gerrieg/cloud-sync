@@ -15,8 +15,9 @@ import {
   type GoogleEventDraft,
   type GoogleWriteOptions,
 } from '../providers/calendar-types.js';
-import { GoogleAuthError, type SyncProviders } from '../providers/types.js';
-import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
+import type { SyncProviders } from '../providers/types.js';
+import type { GuardedDeletion } from './delete-guard.js';
+import { carryOutPlan, failedRun, ignoringNotFound, type PlanEntryOf } from './run-plan.js';
 import { googleFingerprint, googleStartKey } from './google-events.js';
 import { googleEventToIcs, patchIcsWithGoogle } from './google-ics.js';
 import { translateIcs, type TranslatedCalendarObject } from './ics.js';
@@ -62,13 +63,7 @@ export interface CalendarDeletion extends GuardedDeletion {
   readonly appleEtag: string;
 }
 
-/** One planned change: what it is, and (unless it is a no-op) how to carry it out. */
-interface PlanEntry {
-  readonly report: PlannedAction;
-  readonly apply?: () => Promise<void>;
-  /** Set on deletions, which the Delete Guard may hold back for approval. */
-  readonly deletion?: CalendarDeletion;
-}
+type PlanEntry = PlanEntryOf<PlannedAction, CalendarDeletion>;
 
 interface RuleContext {
   readonly options: CalendarSyncOptions;
@@ -115,14 +110,8 @@ function findExistingMatch(
   );
 }
 
-async function ignoreNotFound(work: () => Promise<void>): Promise<void> {
-  try {
-    await work();
-  } catch (error) {
-    if (!(error instanceof GoogleEventNotFoundError)) {
-      throw error;
-    }
-  }
+function ignoreNotFound(work: () => Promise<void>): Promise<void> {
+  return ignoringNotFound(GoogleEventNotFoundError, work);
 }
 
 class RulePlanner {
@@ -631,13 +620,17 @@ export async function executeCalendarDeletion(
 }
 
 async function runRule(context: RuleContext): Promise<RuleRunResult> {
-  const { options, rule, apple } = context;
+  const { options, rule, apple, log } = context;
   const plan = await new RulePlanner(context).plan();
-  const { googleSyncToken } = plan;
-  const guarded = holdBackDeletions(
-    plan.entries,
-    listSyncedEvents(options.db, rule.id).length,
-    (entry, deletion): PlanEntry => ({
+  const outcome = await carryOutPlan({
+    db: options.db,
+    clock: options.clock,
+    profileId: options.profile.id,
+    log,
+    dryRun: options.dryRun,
+    entries: plan.entries,
+    trackedItems: listSyncedEvents(options.db, rule.id).length,
+    held: (entry, deletion): PlanEntry => ({
       report: {
         action: 'skip',
         ruleId: entry.report.ruleId,
@@ -646,58 +639,18 @@ async function runRule(context: RuleContext): Promise<RuleRunResult> {
         reason: 'delete_guard',
       },
     }),
-  );
-  const entries = guarded.entries;
-
-  if (options.dryRun) {
-    return { ruleId: rule.id, status: 'ok', actions: entries.map((entry) => entry.report) };
-  }
-  context.log.runRecovered(rule.id);
-  const deleteApprovalId =
-    guarded.batch.length > 0
-      ? queueDeletions(options.db, {
-          profileId: options.profile.id,
-          domain: 'calendar',
-          ruleId: rule.id,
-          items: guarded.batch,
-          now: options.clock.now(),
-        }).id
-      : undefined;
-
-  // One event that cannot be carried over must not hold up all the others
-  const applied: PlannedAction[] = [];
-  let failure: string | null = null;
-  for (const entry of entries) {
-    try {
-      await entry.apply?.();
-      applied.push(entry.report);
-      context.log.applied(rule.id, entry.report);
-    } catch (error) {
-      if (error instanceof GoogleAuthError) {
-        throw error;
-      }
-      failure ??= error instanceof Error ? error.message : 'Sync failed';
-      context.log.failed(rule.id, entry.report, error);
-    }
-  }
-  if (failure !== null) {
-    // The cursor stays put so the next run tries the failed events again
-    return {
-      ruleId: rule.id,
-      status: 'error',
-      error: failure,
-      ...(deleteApprovalId ? { deleteApprovalId } : {}),
-      actions: applied,
-    };
-  }
-
-  // Only a fully successful run advances the cursor
-  updateRule(options.db, rule.id, {
-    appleCtag: apple.ctag,
-    googleSyncToken,
-    initialSyncCompletedAt: rule.initialSyncCompletedAt ?? options.clock.now(),
+    domain: 'calendar',
+    approvalRuleId: rule.id,
+    recovered: [rule.id],
+    logRuleId: () => rule.id,
+    commit: () =>
+      updateRule(options.db, rule.id, {
+        appleCtag: apple.ctag,
+        googleSyncToken: plan.googleSyncToken,
+        initialSyncCompletedAt: rule.initialSyncCompletedAt ?? options.clock.now(),
+      }),
   });
-  return { ruleId: rule.id, status: 'ok', ...(deleteApprovalId ? { deleteApprovalId } : {}), actions: applied };
+  return { ruleId: rule.id, ...outcome };
 }
 
 /** Plans (and, unless `dryRun`, applies) one-way Apple → Google sync for all rules of a Profile. */
@@ -735,18 +688,11 @@ export async function runCalendarSync(options: CalendarSyncOptions): Promise<Syn
     try {
       results.push(await runRule({ options, rule, apple, log }));
     } catch (error) {
-      if (error instanceof GoogleAuthError) {
-        throw error;
-      }
-      if (!options.dryRun) {
-        log.runFailed(rule.id, calendarRuleLabel(rule), error);
-      }
-      results.push({
-        ruleId: rule.id,
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Sync failed',
-        actions: [],
-      });
+      const message = failedRun(
+        { log, dryRun: options.dryRun, ruleId: rule.id, summary: calendarRuleLabel(rule) },
+        error,
+      );
+      results.push({ ruleId: rule.id, status: 'error', error: message, actions: [] });
     }
   }
 

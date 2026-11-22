@@ -15,7 +15,7 @@ import {
   type GoogleContact,
   type GoogleContactChanges,
 } from '../providers/contact-types.js';
-import { GoogleAuthError, type SyncProviders } from '../providers/types.js';
+import type { SyncProviders } from '../providers/types.js';
 import { readAddressBook, type AddressBookEntry } from './address-book.js';
 import { contactFingerprint, findMatchingContact, photoHash } from './contact-data.js';
 import { listContactRules, updateContactRule, type ContactRuleRow } from './contact-rules-store.js';
@@ -31,7 +31,8 @@ import {
 } from './contact-store.js';
 import { contactRuleLabel } from './rule-labels.js';
 import { SyncLog } from './sync-log-store.js';
-import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
+import type { GuardedDeletion } from './delete-guard.js';
+import { carryOutPlan, failedRun, ignoringNotFound, type PlanEntryOf } from './run-plan.js';
 import { addGroupMember, buildVCard, displayName, mergeIntoVCard, parseVCard } from './vcard.js';
 
 export interface ContactSyncOptions {
@@ -56,11 +57,7 @@ export interface ContactDeletion extends GuardedDeletion {
   readonly appleEtag: string;
 }
 
-interface PlanEntry {
-  readonly report: PlannedContactAction;
-  readonly apply?: () => Promise<void>;
-  readonly deletion?: ContactDeletion;
-}
+type PlanEntry = PlanEntryOf<PlannedContactAction, ContactDeletion>;
 
 /** What changed in Google since the last run (or everything, for a full listing). */
 interface GoogleRead {
@@ -72,14 +69,8 @@ interface GoogleRead {
 
 const sortedUnique = (values: Iterable<string>) => [...new Set(values)].sort();
 
-async function ignoreGoogleNotFound(work: () => Promise<unknown>): Promise<void> {
-  try {
-    await work();
-  } catch (error) {
-    if (!(error instanceof GoogleContactNotFoundError)) {
-      throw error;
-    }
-  }
+function ignoreGoogleNotFound(work: () => Promise<unknown>): Promise<void> {
+  return ignoringNotFound(GoogleContactNotFoundError, work);
 }
 
 /** Carries out one planned deletion and drops its tracking record. */
@@ -575,33 +566,6 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
 
   const google = await readGoogle(options, cursor.googleSyncToken, bidirectional, !initialDone);
   const planned = plan(options, rules, book, google);
-  const guarded = holdBackDeletions(
-    planned.entries,
-    planned.trackedCount,
-    (_entry, deletion): PlanEntry => ({
-      report: { action: 'skip', uid: deletion.uid, summary: deletion.summary, reason: 'delete_guard' },
-    }),
-  );
-  const entries = guarded.entries;
-
-  if (options.dryRun) {
-    return { status: 'ok', actions: entries.map((entry) => entry.report) };
-  }
-  const deleteApprovalId =
-    guarded.batch.length > 0
-      ? queueDeletions(db, {
-          profileId: profile.id,
-          domain: 'contacts',
-          ruleId: null,
-          items: guarded.batch,
-          now: clock.now(),
-        }).id
-      : undefined;
-  const withApproval = deleteApprovalId ? { deleteApprovalId } : {};
-
-  for (const rule of [...enabled, null]) {
-    log.runRecovered(rule?.id ?? null);
-  }
   // A contact belongs to the rule whose group holds it, or else to the rule whose label it carries
   const syncedLabels = new Map(listSyncedContacts(db, profile.id).map((row) => [row.appleContactUid, parseLabels(row)]));
   const ruleIdOf = (uid: string): string | null =>
@@ -610,36 +574,31 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
       rules.find((rule) => syncedLabels.get(uid)?.includes(rule.googleGroupResourceName))
     )?.id ?? null;
 
-  // One contact that cannot be carried over must not hold up all the others
-  const applied: PlannedContactAction[] = [];
-  let failure: string | null = null;
-  for (const entry of entries) {
-    try {
-      await entry.apply?.();
-      applied.push(entry.report);
-      log.applied(ruleIdOf(entry.report.uid), entry.report);
-    } catch (error) {
-      if (error instanceof GoogleAuthError) {
-        throw error;
+  return carryOutPlan({
+    db,
+    clock,
+    profileId: profile.id,
+    log,
+    dryRun: options.dryRun,
+    entries: planned.entries,
+    trackedItems: planned.trackedCount,
+    held: (_entry, deletion): PlanEntry => ({
+      report: { action: 'skip', uid: deletion.uid, summary: deletion.summary, reason: 'delete_guard' },
+    }),
+    domain: 'contacts',
+    approvalRuleId: null,
+    recovered: [...enabled.map((rule) => rule.id), null],
+    logRuleId: (entry) => ruleIdOf(entry.report.uid),
+    commit: () => {
+      setContactCursor(db, profile.id, {
+        appleCtag: raw.ctag,
+        googleSyncToken: bidirectional ? (google?.changes.nextSyncToken ?? null) : null,
+      });
+      for (const rule of enabled) {
+        updateContactRule(db, rule.id, { initialSyncCompletedAt: rule.initialSyncCompletedAt ?? clock.now() });
       }
-      failure ??= error instanceof Error ? error.message : 'Sync failed';
-      log.failed(ruleIdOf(entry.report.uid), entry.report, error);
-    }
-  }
-  if (failure !== null) {
-    // The cursor stays put so the next run tries the failed contacts again
-    return { status: 'error', error: failure, ...withApproval, actions: applied };
-  }
-
-  // Only a fully successful run advances the cursor
-  setContactCursor(db, profile.id, {
-    appleCtag: raw.ctag,
-    googleSyncToken: bidirectional ? (google?.changes.nextSyncToken ?? null) : null,
+    },
   });
-  for (const rule of enabled) {
-    updateContactRule(db, rule.id, { initialSyncCompletedAt: rule.initialSyncCompletedAt ?? clock.now() });
-  }
-  return { status: 'ok', ...withApproval, actions: applied };
 }
 
 /** Plans (and, unless `dryRun`, applies) the profile-wide contact sync; null when there are no contact rules. */
@@ -647,13 +606,9 @@ export async function runContactSync(options: ContactSyncOptions): Promise<Conta
   try {
     return await run(options);
   } catch (error) {
-    if (error instanceof GoogleAuthError) {
-      throw error;
-    }
-    if (!options.dryRun) {
-      new SyncLog(options.db, options.clock, options.profile.id, 'contact').runFailed(null, 'Contact sync', error);
-    }
-    return { status: 'error', error: error instanceof Error ? error.message : 'Sync failed', actions: [] };
+    const log = new SyncLog(options.db, options.clock, options.profile.id, 'contact');
+    const message = failedRun({ log, dryRun: options.dryRun, ruleId: null, summary: 'Contact sync' }, error);
+    return { status: 'error', error: message, actions: [] };
   }
 }
 
