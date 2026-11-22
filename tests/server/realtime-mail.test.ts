@@ -175,6 +175,24 @@ describe('real-time mail sync', () => {
       expect(await s.lastSyncAt()).toBe(before);
     });
 
+    it('syncs a rule that is created again for a folder nothing changed in', async () => {
+      const s = await scenario(['INBOX']);
+      const rule = await s.createRule('Receipts');
+      s.deliver('Receipts', 'Invoice');
+      await s.tick();
+      await s.tick(60_000);
+      expect(s.gmail().map((m) => m.raw)).toEqual([expect.stringContaining('Subject: Invoice')]);
+
+      // Delete the rule together with its Gmail messages (they go to the Trash), then create the same rule again
+      await s.api.request(`${s.rulesPath}/${rule.id}?cleanupGoogle=true`, { method: 'DELETE' });
+      expect(s.gmail().filter((m) => !m.labels.includes('TRASH'))).toEqual([]);
+      await s.tick(60_000);
+      await s.createRule('Receipts');
+      await s.tick(1_000);
+
+      expect(s.gmail().filter((m) => !m.labels.includes('TRASH')).map((m) => m.raw)).toEqual([expect.stringContaining('Subject: Invoice')]);
+    });
+
     it('polls INBOX too while its IDLE connection is down', async () => {
       const s = await scenario();
       s.world.failIdleConnects(s.appleId, 100);

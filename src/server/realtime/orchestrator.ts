@@ -323,6 +323,13 @@ export class RealtimeOrchestrator {
    */
   private async pollMail(profile: ProfileRow, runtime: ProfileRuntime, folderPaths: readonly string[]): Promise<void> {
     const now = this.deps.clock.now();
+    // A folder no enabled rule watches is forgotten: a rule that comes back (created again, enabled
+    // again) must count as a first look, or an unchanged folder would leave it unsynced
+    for (const path of [...runtime.mailSignatures.keys()]) {
+      if (!folderPaths.includes(path)) {
+        runtime.mailSignatures.delete(path);
+      }
+    }
     if (runtime.lastMailPollAt !== null && now - runtime.lastMailPollAt < MAIL_POLL_INTERVAL_MS) {
       return;
     }
