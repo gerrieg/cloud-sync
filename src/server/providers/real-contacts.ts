@@ -4,20 +4,15 @@ import { GoogleSyncTokenExpiredError } from './calendar-types.js';
 import {
   GoogleContactNotFoundError,
   type AppleContactBook,
-  type ContactData,
   type GoogleContact,
   type GoogleContactChanges,
   type GoogleContactGroupInfo,
   type GoogleContactWrite,
 } from './contact-types.js';
-import { assertCalDavWrite, httpStatus, isInvalidGrant, type GoogleClientConfig } from './real-calendar.js';
-import {
-  GOOGLE_INVALID_GRANT,
-  GoogleAuthError,
-  type AppleCredentials,
-  type GoogleTokens,
-  type SyncProviders,
-} from './types.js';
+import { fromPerson, membership, toPerson } from './contact-mapping.js';
+import { httpStatus, translateGoogleError } from './google-errors.js';
+import { assertCalDavWrite, type GoogleClientConfig } from './real-calendar.js';
+import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
 
 const ICLOUD_CARDDAV_URL = 'https://contacts.icloud.com';
 const PERSON_FIELDS = 'names,emailAddresses,phoneNumbers,organizations,birthdays,addresses,biographies,memberships';
@@ -90,77 +85,19 @@ export function createRealAppleContacts(credentials: AppleCredentials | null): A
   };
 }
 
-function fromPerson(person: people_v1.Schema$Person): GoogleContact {
-  const name = person.names?.[0];
-  const organization = person.organizations?.[0];
-  const birthday = person.birthdays?.[0]?.date;
-  const pad = (value: number, width: number) => String(value).padStart(width, '0');
-  const data: ContactData = {
-    givenName: name?.givenName ?? '',
-    familyName: name?.familyName ?? '',
-    middleName: name?.middleName ?? '',
-    prefix: name?.honorificPrefix ?? '',
-    suffix: name?.honorificSuffix ?? '',
-    organization: organization?.name ?? '',
-    title: organization?.title ?? '',
-    emails: (person.emailAddresses ?? []).flatMap((e) => (e.value ? [e.value] : [])),
-    phones: (person.phoneNumbers ?? []).flatMap((p) => (p.value ? [p.value] : [])),
-    // A birthday without a year has no vCard-neutral form here, so it is not synced
-    birthday: birthday?.year && birthday.month && birthday.day ? `${pad(birthday.year, 4)}-${pad(birthday.month, 2)}-${pad(birthday.day, 2)}` : null,
-    addresses: (person.addresses ?? []).map((a) => ({
-      street: a.streetAddress ?? '',
-      city: a.city ?? '',
-      region: a.region ?? '',
-      postalCode: a.postalCode ?? '',
-      country: a.country ?? '',
-    })),
-    note: person.biographies?.[0]?.value ?? '',
-  };
-  return {
-    resourceName: person.resourceName ?? '',
-    data,
-    groupResourceNames: (person.memberships ?? []).flatMap((m) =>
-      m.contactGroupMembership?.contactGroupResourceName ? [m.contactGroupMembership.contactGroupResourceName] : [],
-    ),
-  };
-}
-
-function toPerson(data: ContactData): people_v1.Schema$Person {
-  const [year, month, day] = (data.birthday ?? '').split('-').map(Number);
-  return {
-    names: [
-      {
-        givenName: data.givenName,
-        familyName: data.familyName,
-        middleName: data.middleName,
-        honorificPrefix: data.prefix,
-        honorificSuffix: data.suffix,
-      },
-    ],
-    organizations: data.organization || data.title ? [{ name: data.organization, title: data.title }] : [],
-    emailAddresses: data.emails.map((value) => ({ value })),
-    phoneNumbers: data.phones.map((value) => ({ value })),
-    birthdays: data.birthday ? [{ date: { year, month, day } }] : [],
-    addresses: data.addresses.map((a) => ({
-      streetAddress: a.street,
-      city: a.city,
-      region: a.region,
-      postalCode: a.postalCode,
-      country: a.country,
-    })),
-    biographies: data.note ? [{ value: data.note, contentType: 'TEXT_PLAIN' }] : [],
-  };
-}
-
-const membership = (resourceName: string) => ({ contactGroupMembership: { contactGroupResourceName: resourceName } });
 
 export function createRealGoogleContacts(
   config: GoogleClientConfig,
   tokens: GoogleTokens | null,
   /** Spaces the People API calls of one Profile (about one request per second). */
   limit: <T>(call: () => Promise<T>) => Promise<T>,
+  /** Stands in for the Google client, for tests. */
+  makeClient?: () => people_v1.People,
 ): GoogleContacts {
   function client(): people_v1.People {
+    if (makeClient) {
+      return makeClient();
+    }
     if (!tokens) {
       throw new Error('Google account is not connected');
     }
@@ -173,13 +110,12 @@ export function createRealGoogleContacts(
     try {
       return await limit(() => call(client()));
     } catch (error) {
-      if (isInvalidGrant(error)) {
-        throw new GoogleAuthError(GOOGLE_INVALID_GRANT, error instanceof Error ? error.message : undefined);
-      }
-      if (resourceName !== undefined && (httpStatus(error) === 404 || httpStatus(error) === 410)) {
-        throw new GoogleContactNotFoundError(resourceName);
-      }
-      throw error;
+      throw translateGoogleError(
+        error,
+        resourceName === undefined
+          ? undefined
+          : { statuses: [404, 410], error: () => new GoogleContactNotFoundError(resourceName) },
+      );
     }
   }
 

@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { ImapFlow } from 'imapflow';
 import { createDAVClient } from 'tsdav';
 import type { AppleConnectionReport, ProtocolCheckResult } from '../../shared/profile.js';
+import { isInvalidGrant } from './google-errors.js';
 import { createRealAppleCalendars, createRealGoogleCalendars } from './real-calendar.js';
 import { createRealAppleContacts, createRealGoogleContacts } from './real-contacts.js';
 import {
@@ -99,17 +100,6 @@ async function checkImap(credentials: AppleCredentials, signal: AbortSignal): Pr
     client.close();
     throw error;
   }
-}
-
-function isInvalidGrant(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const responseError = (error as { response?: { data?: { error?: unknown } } }).response?.data?.error;
-  return (
-    responseError === GOOGLE_INVALID_GRANT ||
-    (error instanceof Error && error.message.includes(GOOGLE_INVALID_GRANT))
-  );
 }
 
 function createOAuthClient(config: RealProvidersConfig, redirectUri: string) {

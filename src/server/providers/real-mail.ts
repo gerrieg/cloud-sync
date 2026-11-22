@@ -1,7 +1,6 @@
 import { Readable } from 'node:stream';
 import { google, type gmail_v1 } from 'googleapis';
 import { ImapFlow } from 'imapflow';
-import type { MailFolderUse } from '../../shared/mail.js';
 import {
   AppleMailFolderNotFoundError,
   GoogleMessageNotFoundError,
@@ -11,14 +10,10 @@ import {
   type AppleMailListing,
   type InboxIdleConnection,
 } from './mail-types.js';
-import { httpStatus, isInvalidGrant, type GoogleClientConfig } from './real-calendar.js';
-import {
-  GOOGLE_INVALID_GRANT,
-  GoogleAuthError,
-  type AppleCredentials,
-  type GoogleTokens,
-  type SyncProviders,
-} from './types.js';
+import { translateGoogleError } from './google-errors.js';
+import { describeFolder, isMissingFolder, toEnvelope, toListedMessage } from './mail-mapping.js';
+import type { GoogleClientConfig } from './real-calendar.js';
+import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
 
 export const ICLOUD_IMAP_HOST = 'imap.mail.me.com';
 export const ICLOUD_IMAP_PORT = 993;
@@ -29,20 +24,6 @@ const FETCH_CHUNK = 200;
 
 type AppleMail = SyncProviders['apple']['mail'];
 type GoogleMail = SyncProviders['google']['mail'];
-
-function isMissingFolder(error: unknown): boolean {
-  return (
-    (error as { serverResponseCode?: unknown }).serverResponseCode === 'NONEXISTENT' ||
-    /not exist|nonexistent|unknown mailbox/i.test(String((error as Error).message))
-  );
-}
-
-const SPECIAL_USES: Record<string, MailFolderUse> = {
-  '\\Sent': 'sent',
-  '\\Drafts': 'drafts',
-  '\\Junk': 'junk',
-  '\\Trash': 'trash',
-};
 
 export function createRealAppleMail(credentials: AppleCredentials | null): AppleMail {
   function newClient(): ImapFlow {
@@ -91,12 +72,7 @@ export function createRealAppleMail(credentials: AppleCredentials | null): Apple
   return {
     listFolders: () =>
       withClient(async (client): Promise<AppleMailFolder[]> =>
-        (await client.list()).map((entry) => ({
-          path: entry.path,
-          name: entry.path.split(entry.delimiter).join('/'),
-          use: entry.path.toUpperCase() === 'INBOX' ? 'inbox' : (SPECIAL_USES[entry.specialUse ?? ''] ?? null),
-          selectable: !entry.flags.has('\\Noselect') && !entry.flags.has('\\NonExistent'),
-        })),
+        (await client.list()).map(describeFolder),
       ),
     listFolder: (path) =>
       withClient((client) =>
@@ -106,13 +82,7 @@ export function createRealAppleMail(credentials: AppleCredentials | null): Apple
           const messages: AppleMailListing['messages'][number][] = [];
           if (mailbox && mailbox.exists > 0) {
             for await (const message of client.fetch('1:*', { uid: true, flags: true, size: true, internalDate: true })) {
-              messages.push({
-                uid: message.uid,
-                seen: message.flags?.has('\\Seen') ?? false,
-                flagged: message.flags?.has('\\Flagged') ?? false,
-                size: message.size ?? 0,
-                internalDate: message.internalDate ? new Date(message.internalDate).getTime() : 0,
-              });
+              messages.push(toListedMessage(message));
             }
           }
           return { uidValidity, messages };
@@ -125,15 +95,7 @@ export function createRealAppleMail(credentials: AppleCredentials | null): Apple
           for (let start = 0; start < uids.length; start += FETCH_CHUNK) {
             const range = uids.slice(start, start + FETCH_CHUNK).join(',');
             for await (const message of client.fetch(range, { uid: true, envelope: true }, { uid: true })) {
-              const envelope = message.envelope;
-              envelopes.push({
-                uid: message.uid,
-                messageId: envelope?.messageId ?? null,
-                // A Date header nobody can parse must not make the whole run fail
-                date: envelope?.date && !Number.isNaN(new Date(envelope.date).getTime()) ? new Date(envelope.date).toISOString() : null,
-                from: (envelope?.from ?? []).map((a) => a.address ?? '').join(','),
-                subject: envelope?.subject ?? '',
-              });
+              envelopes.push(toEnvelope(message));
             }
           }
           return envelopes;
@@ -214,8 +176,13 @@ export function createRealGoogleMail(
   tokens: GoogleTokens | null,
   /** Spaces the imports of one Profile. */
   limitImports: <T>(call: () => Promise<T>) => Promise<T>,
+  /** Stands in for the Google client, for tests. */
+  makeClient?: () => gmail_v1.Gmail,
 ): GoogleMail {
   function client(): gmail_v1.Gmail {
+    if (makeClient) {
+      return makeClient();
+    }
     if (!tokens) {
       throw new Error('Google account is not connected');
     }
@@ -228,13 +195,10 @@ export function createRealGoogleMail(
     try {
       return await call(client());
     } catch (error) {
-      if (isInvalidGrant(error)) {
-        throw new GoogleAuthError(GOOGLE_INVALID_GRANT, error instanceof Error ? error.message : undefined);
-      }
-      if (messageId !== undefined && httpStatus(error) === 404) {
-        throw new GoogleMessageNotFoundError(messageId);
-      }
-      throw error;
+      throw translateGoogleError(
+        error,
+        messageId === undefined ? undefined : { statuses: [404], error: () => new GoogleMessageNotFoundError(messageId) },
+      );
     }
   }
 

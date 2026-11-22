@@ -1,10 +1,8 @@
 import { google, type calendar_v3 } from 'googleapis';
-import { createDAVClient, type DAVCalendar } from 'tsdav';
+import { createDAVClient } from 'tsdav';
 import type {
-  AppleCalendarInfo,
   AppleCalendarObject,
   GoogleCalendarInfo,
-  GoogleDateTime,
   GoogleEvent,
   GoogleEventDraft,
   GoogleWriteOptions,
@@ -15,13 +13,9 @@ import {
   GoogleEventNotFoundError,
   GoogleSyncTokenExpiredError,
 } from './calendar-types.js';
-import {
-  GOOGLE_INVALID_GRANT,
-  GoogleAuthError,
-  type AppleCredentials,
-  type GoogleTokens,
-  type SyncProviders,
-} from './types.js';
+import { describeAppleCalendar, fromApiEvent, instantOf, isEventCalendar, toApiEvent } from './calendar-mapping.js';
+import { httpStatus, translateGoogleError } from './google-errors.js';
+import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
 
 const ICLOUD_CALDAV_URL = 'https://caldav.icloud.com';
 
@@ -46,26 +40,10 @@ export function createRealAppleCalendars(credentials: AppleCredentials | null): 
     });
   }
 
-  function describe(calendar: DAVCalendar): AppleCalendarInfo {
-    // Apple marks calendar subscriptions with a `subscribed` resource type; they are read-only.
-    const resourceTypes = Object.keys(calendar.resourcetype ?? {}).map((key) => key.toLowerCase());
-    const subscribed = resourceTypes.some((type) => type.includes('subscribed'));
-    return {
-      url: calendar.url,
-      name: typeof calendar.displayName === 'string' ? calendar.displayName : calendar.url,
-      ctag: calendar.ctag ?? null,
-      readOnly: subscribed,
-      subscribed,
-    };
-  }
-
   return {
     async list() {
       const client = await connect();
-      // Reminder lists (VTODO-only collections) are not event calendars
-      return (await client.fetchCalendars())
-        .filter((calendar) => !calendar.components || calendar.components.includes('VEVENT'))
-        .map(describe);
+      return (await client.fetchCalendars()).filter(isEventCalendar).map(describeAppleCalendar);
     },
     async listObjects(calendarUrl): Promise<AppleCalendarObject[]> {
       const client = await connect();
@@ -130,84 +108,27 @@ export function assertCalDavWrite(response: Response, href: string): void {
   throw new Error(`CalDAV write to ${href} failed (${response.status})`);
 }
 
-export function httpStatus(error: unknown): number | undefined {
-  const status = (error as { code?: unknown; response?: { status?: unknown } } | null)?.response?.status;
-  return typeof status === 'number' ? status : undefined;
-}
-
-export function isInvalidGrant(error: unknown): boolean {
-  const data = (error as { response?: { data?: { error?: unknown } } } | null)?.response?.data;
-  return data?.error === GOOGLE_INVALID_GRANT || (error instanceof Error && error.message.includes(GOOGLE_INVALID_GRANT));
-}
-
 async function guarded<T>(call: () => Promise<T>, eventId?: string): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    if (isInvalidGrant(error)) {
-      throw new GoogleAuthError(GOOGLE_INVALID_GRANT, error instanceof Error ? error.message : undefined);
-    }
-    if (eventId !== undefined && (httpStatus(error) === 404 || httpStatus(error) === 410)) {
-      throw new GoogleEventNotFoundError(eventId);
-    }
-    throw error;
+    throw translateGoogleError(
+      error,
+      eventId === undefined ? undefined : { statuses: [404, 410], error: () => new GoogleEventNotFoundError(eventId) },
+    );
   }
-}
-
-function toApiEvent(draft: GoogleEventDraft): calendar_v3.Schema$Event {
-  return {
-    summary: draft.summary,
-    description: draft.description,
-    location: draft.location,
-    start: { ...draft.start },
-    end: { ...draft.end },
-    recurrence: draft.recurrence ? [...draft.recurrence] : undefined,
-    reminders: { useDefault: false, overrides: draft.reminders.overrides.map((r) => ({ ...r })) },
-    // Google generates its own iCalUID on insert; keep the Apple UID for later matching
-    extendedProperties: { private: { appleUid: draft.iCalUID } },
-  };
-}
-
-function fromApiEvent(event: calendar_v3.Schema$Event): GoogleEvent {
-  const toDateTime = (value: calendar_v3.Schema$EventDateTime | undefined): GoogleDateTime => ({
-    ...(value?.date ? { date: value.date } : {}),
-    ...(value?.dateTime ? { dateTime: value.dateTime } : {}),
-    ...(value?.timeZone ? { timeZone: value.timeZone } : {}),
-  });
-  return {
-    id: event.id ?? '',
-    summary: event.summary ?? '',
-    ...(event.description ? { description: event.description } : {}),
-    ...(event.location ? { location: event.location } : {}),
-    start: toDateTime(event.start ?? undefined),
-    end: toDateTime(event.end ?? undefined),
-    ...(event.recurrence ? { recurrence: event.recurrence } : {}),
-    ...(event.recurringEventId ? { recurringEventId: event.recurringEventId } : {}),
-    ...(event.originalStartTime ? { originalStartTime: toDateTime(event.originalStartTime) } : {}),
-    iCalUID: event.extendedProperties?.private?.appleUid ?? event.iCalUID ?? '',
-    reminders: {
-      useDefault: false,
-      overrides: (event.reminders?.overrides ?? []).flatMap((r) =>
-        r.method && r.minutes !== null && r.minutes !== undefined
-          ? [{ method: r.method === 'email' ? ('email' as const) : ('popup' as const), minutes: r.minutes }]
-          : [],
-      ),
-    },
-  };
-}
-
-function instantOf(value: calendar_v3.Schema$EventDateTime | GoogleDateTime | undefined): number | null {
-  if (value?.dateTime) {
-    return new Date(value.dateTime).getTime();
-  }
-  return value?.date ? new Date(`${value.date}T00:00:00Z`).getTime() : null;
 }
 
 export function createRealGoogleCalendars(
   config: GoogleClientConfig,
   tokens: GoogleTokens | null,
+  /** Stands in for the Google client, for tests. */
+  makeClient?: () => calendar_v3.Calendar,
 ): GoogleCalendars {
   function client(): calendar_v3.Calendar {
+    if (makeClient) {
+      return makeClient();
+    }
     if (!tokens) {
       throw new Error('Google account is not connected');
     }
