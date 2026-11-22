@@ -115,3 +115,20 @@ export class ApplePreconditionFailedError extends Error {
     this.name = 'ApplePreconditionFailedError';
   }
 }
+
+/** What Google needs to push change notifications of one calendar to a webhook. */
+export interface GoogleWatchRequest {
+  /** Our own unique id of the notification channel; Google echoes it in `X-Goog-Channel-ID`. */
+  readonly channelId: string;
+  /** The public HTTPS URL Google calls. */
+  readonly address: string;
+  /** Secret Google echoes in `X-Goog-Channel-Token`. */
+  readonly token: string;
+}
+
+export interface GoogleWatchChannel {
+  /** Google's id of the watched resource; needed to stop the channel. */
+  readonly resourceId: string;
+  /** Epoch milliseconds at which Google lets the channel lapse. */
+  readonly expiresAt: number;
+}

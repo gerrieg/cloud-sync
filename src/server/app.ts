@@ -3,6 +3,7 @@ import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { RealtimeOrchestrator } from './realtime/orchestrator.js';
 import { ProfileLocks } from './sync/profile-locks.js';
 import { UsedOAuthStates } from './auth/oauth-state.js';
 import { decideAccess } from './auth/access.js';
@@ -15,8 +16,10 @@ import { createRealSyncProviders } from './providers/real.js';
 import type { SyncProvidersFactory } from './providers/types.js';
 import { createDeleteApprovalRoutes } from './routes/delete-approvals.js';
 import { createGoogleOAuthRoutes } from './routes/google-oauth.js';
+import { createGoogleWebhookRoutes } from './routes/google-webhook.js';
 import { createHealthRoutes } from './routes/health.js';
 import { createProfileRoutes } from './routes/profiles.js';
+import { createTriggerSyncRoutes } from './routes/trigger-sync.js';
 
 export interface AppVariables {
   session: SessionPayload | null;
@@ -30,7 +33,13 @@ export interface CreateAppOptions {
   readonly staticDir?: string;
 }
 
-export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVariables }> {
+export interface CloudSyncApp {
+  readonly app: Hono<{ Variables: AppVariables }>;
+  /** The background triggers (IDLE, polling, webhooks); the server starts it, tests drive it by hand. */
+  readonly realtime: RealtimeOrchestrator;
+}
+
+export function createApp(options: CreateAppOptions): CloudSyncApp {
   const { config, dbContext, staticDir } = options;
   const clock = options.clock ?? systemClock;
   const locks = new ProfileLocks();
@@ -40,6 +49,7 @@ export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVaria
       googleClientId: config.googleClientId,
       googleClientSecret: config.googleClientSecret,
     });
+  const realtime = new RealtimeOrchestrator({ config, db: dbContext.db, clock, locks, createSyncProviders });
   const app = new Hono<{ Variables: AppVariables }>();
 
   // Access-decision middleware enforces public vs self-authenticated vs session-protected routes
@@ -68,8 +78,10 @@ export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVaria
   app.route('/api/health', createHealthRoutes(dbContext.sqlite));
   app.route(
     '/api/profiles',
-    createProfileRoutes({ config, db: dbContext.db, clock, locks, createSyncProviders }),
+    createProfileRoutes({ config, db: dbContext.db, clock, locks, createSyncProviders, realtime }),
   );
+  app.route('/webhooks/google', createGoogleWebhookRoutes({ config, db: dbContext.db, clock, realtime }));
+  app.route('/api/trigger-sync', createTriggerSyncRoutes({ config, db: dbContext.db, realtime }));
   app.route(
     '/api/delete-approvals',
     createDeleteApprovalRoutes({ config, db: dbContext.db, clock, locks, createSyncProviders }),
@@ -114,5 +126,5 @@ export function createApp(options: CreateAppOptions): Hono<{ Variables: AppVaria
     });
   }
 
-  return app;
+  return { app, realtime };
 }

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { secondaryButtonClass } from '../lib/styles.js';
 import { useAsyncAction } from '../lib/use-async-action.js';
 import { deleteProfile, updateProfile, type Profile } from '../lib/profiles-api.js';
+import { ProfileStatusBadges } from './ProfileStatusBadges.js';
 
 interface ProfileSettingsPanelProps {
   profile: Profile;
@@ -40,6 +41,7 @@ export function ProfileSettingsPanel({ profile, onChange, onDeleted }: ProfileSe
               Paused
             </span>
           )}
+          <ProfileStatusBadges profileId={profile.id} />
         </div>
         <div className="flex items-center gap-2">
           <button

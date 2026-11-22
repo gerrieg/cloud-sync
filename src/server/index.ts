@@ -38,19 +38,23 @@ function main(): void {
 
   const dbContext = createDatabase(config.databasePath);
   const staticDir = resolveStaticDir();
-  const app = createApp({ config, dbContext, staticDir });
+  const { app, realtime } = createApp({ config, dbContext, staticDir });
 
   const server = serve({
     fetch: app.fetch,
     port: config.port,
   });
 
+  realtime.start();
+
   console.log(`Cloud Sync listening on http://0.0.0.0:${config.port}`);
 
   const shutdown = () => {
     server.close(() => {
-      dbContext.close();
-      process.exit(0);
+      void realtime.stop().finally(() => {
+        dbContext.close();
+        process.exit(0);
+      });
     });
   };
 

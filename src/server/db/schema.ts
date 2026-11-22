@@ -194,6 +194,21 @@ export const mailFolderState = sqliteTable(
   (table) => [uniqueIndex('mail_folder_state_idx').on(table.profileId, table.folderPath)],
 );
 
+/** Google Calendar `events.watch` notification channels; the token Google echoes is stored encrypted. */
+export const googleWatchChannels = sqliteTable('google_watch_channels', {
+  /** Our own channel id, echoed by Google in `X-Goog-Channel-ID`. */
+  id: text('id').primaryKey(),
+  profileId: text('profile_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  googleCalendarId: text('google_calendar_id').notNull(),
+  /** Google's id of the watched resource; needed to stop the channel. */
+  resourceId: text('resource_id').notNull(),
+  tokenEnc: text('token_enc').notNull(),
+  /** Epoch milliseconds at which Google lets the channel lapse. */
+  expiresAt: integer('expires_at').notNull(),
+});
+
 export const pendingDeleteApprovals = sqliteTable('pending_delete_approvals', {
   id: text('id').primaryKey(),
   profileId: text('profile_id')

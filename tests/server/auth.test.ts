@@ -327,13 +327,15 @@ describe('Single-Admin 2FA Auth & Session HTTP Seam', () => {
     const protectedApi = await ctx.app.request('/api/auth/me');
     expect(protectedApi.status).toBe(401);
 
-    // Self-authenticated routes bypass session middleware (do not redirect to /login or return session 401)
+    // Self-authenticated routes never redirect to /login. They answer 401 themselves when their own
+    // credential is missing; that they work without a session is covered by the trigger-sync and
+    // realtime-google tests, which succeed with a valid token and no cookie.
     const webhookRes = await ctx.app.request('/webhooks/google/profile-1', { method: 'POST' });
-    expect(webhookRes.status).not.toBe(302);
-    expect(webhookRes.status).not.toBe(401);
+    expect(webhookRes.status).toBe(401);
+    expect(webhookRes.headers.get('location')).toBeNull();
 
     const triggerRes = await ctx.app.request('/api/trigger-sync/profile-1', { method: 'POST' });
-    expect(triggerRes.status).not.toBe(302);
-    expect(triggerRes.status).not.toBe(401);
+    expect(triggerRes.status).toBe(401);
+    expect(triggerRes.headers.get('location')).toBeNull();
   });
 });

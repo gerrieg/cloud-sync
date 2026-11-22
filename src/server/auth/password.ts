@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 
-function timingSafeEqualStrings(a: string, b: string): boolean {
+export function timingSafeEqualStrings(a: string, b: string): boolean {
   const hashA = crypto.createHash('sha256').update(a, 'utf8').digest();
   const hashB = crypto.createHash('sha256').update(b, 'utf8').digest();
   return crypto.timingSafeEqual(hashA, hashB);

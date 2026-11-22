@@ -19,6 +19,7 @@ import {
   type ProfileRowPatch,
 } from '../profiles/profile-store.js';
 import type { SyncProvidersFactory } from '../providers/types.js';
+import type { RealtimeOrchestrator } from '../realtime/orchestrator.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
 import { createCalendarRoutes } from './calendar-sync.js';
 import { createContactRoutes } from './contact-sync.js';
@@ -31,6 +32,7 @@ export interface ProfileRouteDeps {
   readonly clock: Clock;
   readonly locks: ProfileLocks;
   readonly createSyncProviders: SyncProvidersFactory;
+  readonly realtime: RealtimeOrchestrator;
 }
 
 const MAX_NAME_LENGTH = 100;
@@ -44,7 +46,7 @@ function parseName(value: unknown): string | null {
 }
 
 export function createProfileRoutes(deps: ProfileRouteDeps): Hono<ProfileEnv> {
-  const { config, db, clock, locks, createSyncProviders } = deps;
+  const { config, db, clock, locks, createSyncProviders, realtime } = deps;
   const routes = new Hono<ProfileEnv>();
 
   // Every `/:id` route works on an existing Profile: resolve it once, answer 404 otherwise.
@@ -74,6 +76,8 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<ProfileEnv> {
   });
 
   routes.get('/:id', (c) => c.json(toProfileDto(c.get('profile')), 200));
+
+  routes.get('/:id/status', (c) => c.json(realtime.statusOf(c.get('profile')), 200));
 
   routes.patch('/:id', async (c) => {
     const body = (await c.req.json().catch(() => null)) as {

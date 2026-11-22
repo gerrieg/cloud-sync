@@ -211,4 +211,32 @@ describe('Profile management UI (fetch boundary)', () => {
       expect(backend.calls.some((c) => c.path === '/api/profiles/a/rotate-trigger-token')).toBe(true);
     });
   });
+
+  describe('live status in the Profile header', () => {
+    it.each([
+      [{ mailIdle: 'connected', googleCalendar: 'webhook' }, 'Mail IDLE: connected', 'Google Calendar: webhook'],
+      [{ mailIdle: 'reconnecting', googleCalendar: 'polling' }, 'Mail IDLE: reconnecting', 'Google Calendar: polling fallback'],
+      [{ mailIdle: 'paused', googleCalendar: 'inactive' }, 'Mail IDLE: paused', 'Google Calendar: inactive'],
+      [{ mailIdle: 'disconnected', googleCalendar: 'inactive' }, 'Mail IDLE: disconnected', 'Google Calendar: inactive'],
+    ])('shows %j as "%s" and "%s"', async (status, mailText, calendarText) => {
+      installBackend([profile({ id: 'a', name: 'Anna' })], (call) =>
+        call.method === 'GET' && call.path === '/api/profiles/a/status' ? json(status) : undefined,
+      );
+      render(<App />);
+
+      const header = (await screen.findByRole('heading', { name: 'Anna' })).parentElement!;
+      expect(await within(header).findByText(mailText)).toBeInTheDocument();
+      expect(within(header).getByText(calendarText)).toBeInTheDocument();
+    });
+
+    it('keeps the header usable when the status cannot be loaded', async () => {
+      installBackend([profile({ id: 'a', name: 'Anna' })], (call) =>
+        call.path === '/api/profiles/a/status' ? json({ error: 'boom' }, 500) : undefined,
+      );
+      render(<App />);
+
+      expect(await screen.findByRole('heading', { name: 'Anna' })).toBeInTheDocument();
+      expect(screen.queryByText(/Mail IDLE/)).not.toBeInTheDocument();
+    });
+  });
 });

@@ -27,7 +27,7 @@ export class FakeSyncProviders {
   private readonly invalidGrantCodes = new Set<string>();
 
   /** Stateful Apple CalDAV + Google Calendar behind the calendar calls. */
-  readonly calendars = new FakeCalendarWorld();
+  readonly calendars: FakeCalendarWorld;
 
   /** Stateful iCloud address book + Google People behind the contact calls. */
   readonly contacts = new FakeContactWorld();
@@ -37,6 +37,10 @@ export class FakeSyncProviders {
 
   /** Every context the app instantiated providers with (decrypted, as the adapters would see it). */
   readonly contexts: SyncProvidersContext[] = [];
+
+  constructor(clock?: { now(): number }) {
+    this.calendars = new FakeCalendarWorld(clock);
+  }
 
   addAppleAccount(appleId: string, password: string): void {
     this.appleAccounts.set(appleId, { password, failing: new Map() });

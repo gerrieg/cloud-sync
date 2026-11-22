@@ -8,6 +8,8 @@ import type {
   GoogleEvent,
   GoogleEventChanges,
   GoogleEventDraft,
+  GoogleWatchChannel,
+  GoogleWatchRequest,
   GoogleWriteOptions,
 } from './calendar-types.js';
 import type {
@@ -21,10 +23,13 @@ import type {
 import type {
   AppleMailEnvelope,
   AppleMailFolder,
+  AppleMailFolderStatus,
   AppleMailListing,
   GoogleMailImport,
   GoogleMailLabel,
   GoogleMailModify,
+  InboxIdleConnection,
+  InboxIdleHandlers,
 } from './mail-types.js';
 
 export interface AppleCredentials {
@@ -90,6 +95,13 @@ export interface SyncProviders {
       fetchEnvelopes(path: string, uids: readonly number[]): Promise<AppleMailEnvelope[]>;
       /** The complete RFC 822 message. */
       fetchRaw(path: string, uid: number): Promise<Buffer>;
+      /** `STATUS` of the given folders over one short-lived connection; folders that do not exist are left out. */
+      folderStatus(paths: readonly string[]): Promise<AppleMailFolderStatus[]>;
+      /**
+       * Opens one persistent connection that IDLEs on INBOX. iCloud caps concurrent IMAP
+       * connections, so the app opens at most one of these per Profile (ADR-0003).
+       */
+      openInboxIdle(handlers: InboxIdleHandlers): Promise<InboxIdleConnection>;
     };
   };
   readonly google: {
@@ -123,6 +135,10 @@ export interface SyncProviders {
       ): Promise<GoogleEvent>;
       /** Throws GoogleEventNotFoundError if the event no longer exists. */
       deleteEvent(calendarId: string, eventId: string, options: GoogleWriteOptions): Promise<void>;
+      /** `events.watch`: Google calls the request's webhook whenever the calendar changes. */
+      watch(calendarId: string, request: GoogleWatchRequest): Promise<GoogleWatchChannel>;
+      /** Stops a channel; a channel that is already gone is not an error. */
+      stopWatch(channelId: string, resourceId: string): Promise<void>;
     };
     /** People API calls are throttled to about one per second per Profile by the adapter. */
     readonly contacts: {

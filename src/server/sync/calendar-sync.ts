@@ -80,7 +80,7 @@ interface Plan {
 }
 
 /** Read-only and subscribed Apple calendars can never receive Google changes. */
-function isBidirectional(rule: RuleRow): boolean {
+export function isBidirectional(rule: RuleRow): boolean {
   return rule.direction === 'bidirectional' && !rule.appleReadOnly;
 }
 

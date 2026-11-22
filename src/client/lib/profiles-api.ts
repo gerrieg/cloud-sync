@@ -1,7 +1,7 @@
-import type { AppleTestReport, ProfileDto, ProfileUpdate } from '../../shared/profile.js';
+import type { AppleTestReport, ProfileDto, ProfileStatusDto, ProfileUpdate } from '../../shared/profile.js';
 import { apiRequest as request } from './http.js';
 
-export type { AppleTestReport, ProfileDto as Profile, ProfileUpdate };
+export type { AppleTestReport, ProfileDto as Profile, ProfileStatusDto, ProfileUpdate };
 
 export function listProfiles(): Promise<ProfileDto[]> {
   return request('/api/profiles');
@@ -39,4 +39,8 @@ export async function rotateTriggerToken(id: string): Promise<string> {
     { method: 'POST' },
   );
   return data.token;
+}
+
+export function getProfileStatus(id: string): Promise<ProfileStatusDto> {
+  return request(`/api/profiles/${encodeURIComponent(id)}/status`);
 }

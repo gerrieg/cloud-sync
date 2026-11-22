@@ -3,6 +3,7 @@ import {
   GoogleMessageNotFoundError,
   type AppleMailEnvelope,
   type GoogleMailLabel,
+  type InboxIdleHandlers,
 } from '../../src/server/providers/mail-types.js';
 import { GoogleAuthError, type SyncProviders } from '../../src/server/providers/types.js';
 import type { MailFolderUse } from '../../src/shared/mail.js';
@@ -37,6 +38,11 @@ interface GmailAccount {
   messages: Map<string, GmailMessage>;
 }
 
+interface IdleSession {
+  readonly handlers: InboxIdleHandlers;
+  open: boolean;
+}
+
 const SYSTEM_LABELS = ['INBOX', 'SENT', 'UNREAD', 'STARRED', 'TRASH'];
 
 function header(raw: Buffer, name: string): string | null {
@@ -52,6 +58,15 @@ export class FakeMailWorld {
   readonly envelopeFetches: { path: string; uid: number }[] = [];
   readonly rawFetches: { path: string; uid: number }[] = [];
 
+  /** Every `STATUS` request, in order, so tests can see which folders were polled. */
+  readonly statusRequests: string[][] = [];
+  /** Highest number of IDLE connections that were open at the same time, per Apple ID. */
+  private readonly peakIdle = new Map<string, number>();
+
+  private readonly dropOnOpen = new Set<string>();
+  private readonly idleAttempts = new Map<string, number>();
+  private readonly idleSessions = new Map<string, IdleSession[]>();
+  private readonly idleConnectFailures = new Map<string, number>();
   private readonly apple = new Map<string, Map<string, AppleFolder>>();
   private readonly google = new Map<string, GmailAccount>();
   private counter = 0;
@@ -81,6 +96,7 @@ export class FakeMailWorld {
       flagged: message.flagged ?? false,
       internalDate: message.internalDate ?? Date.parse(header(Buffer.from(message.raw), 'Date') ?? ''),
     });
+    this.notifyIdle(appleId, path);
     return uid;
   }
 
@@ -95,6 +111,8 @@ export class FakeMailWorld {
     const target = this.folder(appleId, to);
     const newUid = target.nextUid++;
     target.messages.set(newUid, { ...message });
+    this.notifyIdle(appleId, from);
+    this.notifyIdle(appleId, to);
     return newUid;
   }
 
@@ -107,11 +125,13 @@ export class FakeMailWorld {
     const target = this.folder(appleId, to);
     const newUid = target.nextUid++;
     target.messages.set(newUid, { ...message });
+    this.notifyIdle(appleId, to);
     return newUid;
   }
 
   expunge(appleId: string, path: string, uid: number): void {
     this.folder(appleId, path).messages.delete(uid);
+    this.notifyIdle(appleId, path);
   }
 
   setFlags(appleId: string, path: string, uid: number, flags: { seen?: boolean; flagged?: boolean }): void {
@@ -120,6 +140,44 @@ export class FakeMailWorld {
       throw new Error(`No message ${uid} in ${path}`);
     }
     Object.assign(message, flags);
+    this.notifyIdle(appleId, path);
+  }
+
+  // ---- Apple IMAP IDLE ---------------------------------------------------------------------
+
+  /** Number of IDLE connections currently open for an Apple ID. */
+  openIdleConnections(appleId: string): number {
+    return (this.idleSessions.get(appleId) ?? []).filter((session) => session.open).length;
+  }
+
+  /** The most IDLE connections that were ever open at once for an Apple ID. */
+  peakIdleConnections(appleId: string): number {
+    return this.peakIdle.get(appleId) ?? 0;
+  }
+
+  /** How often the app tried to open an IDLE connection for an Apple ID, failed attempts included. */
+  idleConnectAttempts(appleId: string): number {
+    return this.idleAttempts.get(appleId) ?? 0;
+  }
+
+  /** The next IDLE connection of the Apple ID drops right after it was opened, before the app stored it. */
+  dropNextIdleRightAfterOpen(appleId: string): void {
+    this.dropOnOpen.add(appleId);
+  }
+
+  /** The next `count` attempts to open an IDLE connection fail. */
+  failIdleConnects(appleId: string, count: number): void {
+    this.idleConnectFailures.set(appleId, count);
+  }
+
+  /** The server (or the network) drops every IDLE connection of the Apple ID. */
+  dropIdleConnections(appleId: string): void {
+    for (const session of this.idleSessions.get(appleId) ?? []) {
+      if (session.open) {
+        session.open = false;
+        session.handlers.onClose(new Error('Connection reset by peer'));
+      }
+    }
   }
 
   /** The server renumbers the folder: new UIDVALIDITY, every message under a new UID. Returns old → new. */
@@ -234,6 +292,43 @@ export class FakeMailWorld {
         this.rawFetches.push({ path, uid });
         return message.raw;
       },
+      folderStatus: async (paths) => {
+        this.statusRequests.push([...paths]);
+        return paths.flatMap((path) => {
+          const folder = this.folders(id).get(path);
+          return folder
+            ? [
+                {
+                  path,
+                  uidValidity: folder.uidValidity,
+                  uidNext: folder.nextUid,
+                  messages: folder.messages.size,
+                  unseen: [...folder.messages.values()].filter((message) => !message.seen).length,
+                },
+              ]
+            : [];
+        });
+      },
+      openInboxIdle: async (handlers) => {
+        this.idleAttempts.set(id, (this.idleAttempts.get(id) ?? 0) + 1);
+        const failures = this.idleConnectFailures.get(id) ?? 0;
+        if (failures > 0) {
+          this.idleConnectFailures.set(id, failures - 1);
+          throw new Error('IMAP connection refused');
+        }
+        const session: IdleSession = { handlers, open: true };
+        this.idleSessions.set(id, [...(this.idleSessions.get(id) ?? []), session]);
+        this.peakIdle.set(id, Math.max(this.peakIdle.get(id) ?? 0, this.openIdleConnections(id)));
+        if (this.dropOnOpen.delete(id)) {
+          session.open = false;
+          handlers.onClose(new Error('Connection reset by peer'));
+        }
+        return {
+          close: async () => {
+            session.open = false;
+          },
+        };
+      },
     };
   }
 
@@ -297,6 +392,17 @@ export class FakeMailWorld {
   }
 
   // ---- internals ---------------------------------------------------------------------------
+
+  private notifyIdle(appleId: string, path: string): void {
+    if (path.toUpperCase() !== 'INBOX') {
+      return;
+    }
+    for (const session of this.idleSessions.get(appleId) ?? []) {
+      if (session.open) {
+        session.handlers.onChange();
+      }
+    }
+  }
 
   private folders(appleId: string): Map<string, AppleFolder> {
     let folders = this.apple.get(appleId);

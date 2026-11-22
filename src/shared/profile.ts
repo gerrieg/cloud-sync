@@ -13,6 +13,21 @@ export interface ProfileDto {
   readonly lastSyncStatus: string | null;
 }
 
+/** State of the persistent IMAP `IDLE` connection that watches a Profile's INBOX. */
+export type MailIdleState = 'connected' | 'reconnecting' | 'paused' | 'disconnected';
+
+/**
+ * How Google → Apple calendar changes reach the app: pushed by `webhook`, or found by `polling`
+ * (no public URL, or the channel is missing, degraded or expired); `inactive` without work to do.
+ */
+export type GoogleCalendarMode = 'webhook' | 'polling' | 'inactive';
+
+/** Response of `GET /api/profiles/:id/status`: how the real-time triggers of a Profile are doing. */
+export interface ProfileStatusDto {
+  readonly mailIdle: MailIdleState;
+  readonly googleCalendar: GoogleCalendarMode;
+}
+
 /** Body of `PATCH /api/profiles/:id`. Apple credentials must be sent together. */
 export interface ProfileUpdate {
   readonly name?: string;

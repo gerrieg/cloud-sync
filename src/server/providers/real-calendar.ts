@@ -339,5 +339,27 @@ export function createRealGoogleCalendars(
         eventId,
       );
     },
+    async watch(calendarId, { channelId, address, token }) {
+      const response = await guarded(() =>
+        client().events.watch({
+          calendarId,
+          requestBody: { id: channelId, type: 'web_hook', address, token },
+        }),
+      );
+      const expiresAt = Number(response.data.expiration);
+      if (!response.data.resourceId || !Number.isFinite(expiresAt)) {
+        throw new Error('Google did not describe the notification channel');
+      }
+      return { resourceId: response.data.resourceId, expiresAt };
+    },
+    async stopWatch(channelId, resourceId) {
+      try {
+        await guarded(() => client().channels.stop({ requestBody: { id: channelId, resourceId } }));
+      } catch (error) {
+        if (httpStatus(error) !== 404) {
+          throw error;
+        }
+      }
+    },
   };
 }

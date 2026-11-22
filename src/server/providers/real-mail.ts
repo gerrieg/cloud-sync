@@ -7,7 +7,9 @@ import {
   GoogleMessageNotFoundError,
   type AppleMailEnvelope,
   type AppleMailFolder,
+  type AppleMailFolderStatus,
   type AppleMailListing,
+  type InboxIdleConnection,
 } from './mail-types.js';
 import { httpStatus, isInvalidGrant, type GoogleClientConfig } from './real-calendar.js';
 import {
@@ -28,6 +30,13 @@ const FETCH_CHUNK = 200;
 type AppleMail = SyncProviders['apple']['mail'];
 type GoogleMail = SyncProviders['google']['mail'];
 
+function isMissingFolder(error: unknown): boolean {
+  return (
+    (error as { serverResponseCode?: unknown }).serverResponseCode === 'NONEXISTENT' ||
+    /not exist|nonexistent|unknown mailbox/i.test(String((error as Error).message))
+  );
+}
+
 const SPECIAL_USES: Record<string, MailFolderUse> = {
   '\\Sent': 'sent',
   '\\Drafts': 'drafts',
@@ -36,18 +45,22 @@ const SPECIAL_USES: Record<string, MailFolderUse> = {
 };
 
 export function createRealAppleMail(credentials: AppleCredentials | null): AppleMail {
-  /** iCloud caps concurrent IMAP connections, so every call uses one short-lived connection. */
-  async function withClient<T>(work: (client: ImapFlow) => Promise<T>): Promise<T> {
+  function newClient(): ImapFlow {
     if (!credentials) {
       throw new Error('No Apple credentials configured');
     }
-    const client = new ImapFlow({
+    return new ImapFlow({
       host: ICLOUD_IMAP_HOST,
       port: ICLOUD_IMAP_PORT,
       secure: true,
       auth: { user: credentials.appleId, pass: credentials.appPassword },
       logger: false,
     });
+  }
+
+  /** iCloud caps concurrent IMAP connections, so every call uses one short-lived connection. */
+  async function withClient<T>(work: (client: ImapFlow) => Promise<T>): Promise<T> {
+    const client = newClient();
     // imapflow emits connection errors; without a listener they would crash the process
     client.on('error', () => undefined);
     await client.connect();
@@ -63,7 +76,7 @@ export function createRealAppleMail(credentials: AppleCredentials | null): Apple
     try {
       lock = await client.getMailboxLock(path, { readOnly: true });
     } catch (error) {
-      if ((error as { serverResponseCode?: unknown }).serverResponseCode === 'NONEXISTENT' || /not exist|nonexistent|unknown mailbox/i.test(String((error as Error).message))) {
+      if (isMissingFolder(error)) {
         throw new AppleMailFolderNotFoundError(path);
       }
       throw error;
@@ -136,6 +149,63 @@ export function createRealAppleMail(credentials: AppleCredentials | null): Apple
           return message.source;
         }),
       ),
+    folderStatus: (paths) =>
+      withClient(async (client): Promise<AppleMailFolderStatus[]> => {
+        const statuses: AppleMailFolderStatus[] = [];
+        for (const path of paths) {
+          try {
+            const status = await client.status(path, { messages: true, uidNext: true, uidValidity: true, unseen: true });
+            if (!status) {
+              continue;
+            }
+            statuses.push({
+              path,
+              uidValidity: Number(status.uidValidity ?? 0),
+              uidNext: status.uidNext ?? 0,
+              messages: status.messages ?? 0,
+              unseen: status.unseen ?? 0,
+            });
+          } catch (error) {
+            // A folder that is gone shows up as a missing entry; the sync run itself reports it
+            if (!isMissingFolder(error)) {
+              throw error;
+            }
+          }
+        }
+        return statuses;
+      }),
+    async openInboxIdle({ onChange, onClose }): Promise<InboxIdleConnection> {
+      const client = newClient();
+      let lastError: Error | null = null;
+      let opened = false;
+      let closing = false;
+      client.on('error', (error: Error) => {
+        lastError = error;
+      });
+      // imapflow IDLEs by itself while a mailbox is open and no command is running
+      client.on('exists', onChange);
+      client.on('expunge', onChange);
+      client.on('flags', onChange);
+      client.on('close', () => {
+        if (opened && !closing) {
+          onClose(lastError);
+        }
+      });
+      try {
+        await client.connect();
+        await client.mailboxOpen('INBOX', { readOnly: true });
+      } catch (error) {
+        client.close();
+        throw error;
+      }
+      opened = true;
+      return {
+        close: async () => {
+          closing = true;
+          await client.logout().catch(() => client.close());
+        },
+      };
+    },
   };
 }
 

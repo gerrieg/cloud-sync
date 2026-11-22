@@ -52,7 +52,28 @@ export interface SeedGoogleEvent {
  * Stateful in-memory Apple CalDAV + Google Calendar. Apple state is keyed by Apple ID, Google
  * state by the account's refresh token, so several Profiles can live side by side.
  */
+export interface FakeWatchChannel {
+  readonly id: string;
+  readonly resourceId: string;
+  readonly calendarId: string;
+  readonly address: string;
+  readonly token: string;
+  readonly expiresAt: number;
+  stopped: boolean;
+}
+
+/** How long the fake Google keeps a notification channel alive. */
+export const FAKE_WATCH_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+
 export class FakeCalendarWorld {
+  /** Every notification channel ever registered per account, stopped ones included. */
+  readonly watchChannels: FakeWatchChannel[] = [];
+  /** How long the fake Google keeps a notification channel alive; a test may shorten it. */
+  watchLifetimeMs = FAKE_WATCH_LIFETIME_MS;
+  private readonly failingWatches = new Map<string, Error>();
+
+  constructor(private readonly clock: { now(): number } = { now: () => Date.now() }) {}
+
   /** Every Google write, in order, with the `sendUpdates` it was called with. */
   readonly writes: GoogleWrite[] = [];
   /** Every Apple write (CalDAV PUT / DELETE), in order. */
@@ -194,6 +215,22 @@ export class FakeCalendarWorld {
     };
   }
 
+  /** Every `events.watch` of this account fails with `error` until `clearWatchFailure` is called. */
+  failWatches(refreshToken: string, error: Error): void {
+    this.failingWatches.set(refreshToken, error);
+  }
+
+  clearWatchFailure(refreshToken: string): void {
+    this.failingWatches.delete(refreshToken);
+  }
+
+  /** The channels of a calendar that Google would still deliver to. */
+  activeWatchChannels(calendarId: string): FakeWatchChannel[] {
+    return this.watchChannels.filter(
+      (channel) => channel.calendarId === calendarId && !channel.stopped && channel.expiresAt > this.clock.now(),
+    );
+  }
+
   rejectGoogleWithInvalidGrant(refreshToken: string): void {
     this.invalidGrant.add(refreshToken);
   }
@@ -286,6 +323,31 @@ export class FakeCalendarWorld {
     };
 
     return {
+      watch: async (calendarId, request) => {
+        authenticate();
+        const failure = this.failingWatches.get(token);
+        if (failure) {
+          throw failure;
+        }
+        const channel: FakeWatchChannel = {
+          id: request.channelId,
+          resourceId: `resource-${this.next('res')}`,
+          calendarId,
+          address: request.address,
+          token: request.token,
+          expiresAt: this.clock.now() + this.watchLifetimeMs,
+          stopped: false,
+        };
+        this.watchChannels.push(channel);
+        return { resourceId: channel.resourceId, expiresAt: channel.expiresAt };
+      },
+      stopWatch: async (channelId) => {
+        authenticate();
+        const channel = this.watchChannels.find((candidate) => candidate.id === channelId);
+        if (channel) {
+          channel.stopped = true;
+        }
+      },
       list: async () => {
         this.trace.push(`google.list:${token}`);
         authenticate();

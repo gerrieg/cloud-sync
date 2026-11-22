@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import * as OTPAuth from 'otpauth';
-import { createApp, type CreateAppOptions } from '../../src/server/app.js';
+import { createApp, type CloudSyncApp, type CreateAppOptions } from '../../src/server/app.js';
 import type { Clock } from '../../src/server/clock.js';
 import { parseConfig, type AppConfig } from '../../src/server/config.js';
 import { createDatabase, type DatabaseContext } from '../../src/server/db/index.js';
@@ -46,7 +46,8 @@ export class FakeClock implements Clock {
 }
 
 export interface TestContext {
-  readonly app: ReturnType<typeof createApp>;
+  readonly app: CloudSyncApp['app'];
+  readonly realtime: CloudSyncApp['realtime'];
   readonly config: AppConfig;
   readonly dbContext: DatabaseContext;
   readonly clock: FakeClock;
@@ -76,7 +77,7 @@ export function createTestContext(options?: {
 
   const clock = new FakeClock(options?.initialTimeMs);
   const dbContext = createDatabase(':memory:');
-  const providers = new FakeSyncProviders();
+  const providers = new FakeSyncProviders(clock);
   const appOptions: CreateAppOptions = {
     config,
     dbContext,
@@ -84,7 +85,7 @@ export function createTestContext(options?: {
     createSyncProviders: providers.factory,
     staticDir: options?.staticDir,
   };
-  const app = createApp(appOptions);
+  const { app, realtime } = createApp(appOptions);
 
   const totp = new OTPAuth.TOTP({
     secret: OTPAuth.Secret.fromBase32(config.totpSecret),
@@ -95,6 +96,7 @@ export function createTestContext(options?: {
 
   return {
     app,
+    realtime,
     config,
     dbContext,
     clock,

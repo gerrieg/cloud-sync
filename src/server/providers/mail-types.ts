@@ -37,6 +37,27 @@ export interface AppleMailEnvelope {
   readonly subject: string;
 }
 
+/** The counters of an IMAP `STATUS` command: cheap, and enough to tell that a folder changed. */
+export interface AppleMailFolderStatus {
+  readonly path: string;
+  readonly uidValidity: number;
+  readonly uidNext: number;
+  readonly messages: number;
+  readonly unseen: number;
+}
+
+export interface InboxIdleHandlers {
+  /** A message arrived, disappeared or changed its flags in INBOX. */
+  onChange(): void;
+  /** The connection dropped by itself (never called after `close()`). */
+  onClose(error: Error | null): void;
+}
+
+/** One persistent connection that waits for changes in INBOX (IMAP `IDLE`). */
+export interface InboxIdleConnection {
+  close(): Promise<void>;
+}
+
 export interface GoogleMailLabel {
   /** Gmail label id; the system labels (`INBOX`, `SENT`, `UNREAD`, `STARRED`) have their name as id. */
   readonly id: string;

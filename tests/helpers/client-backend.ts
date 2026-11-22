@@ -66,6 +66,9 @@ export function installBackend(initial: ProfileFixture[], extra?: (call: Recorde
       return json({ folders: [] });
     }
     if (method === 'GET' && /^\/api\/profiles\/[^/]+\/delete-approvals$/.test(path)) return json([]);
+    if (method === 'GET' && /^\/api\/profiles\/[^/]+\/status$/.test(path)) {
+      return json({ mailIdle: 'disconnected', googleCalendar: 'inactive' });
+    }
 
     if (path === '/api/auth/me') return json({ username: 'admin' });
     if (path === '/api/auth/logout') return json({ ok: true });
