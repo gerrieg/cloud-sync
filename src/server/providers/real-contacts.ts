@@ -10,7 +10,7 @@ import {
   type GoogleContactWrite,
 } from './contact-types.js';
 import { fromPerson, membership, toPerson } from './contact-mapping.js';
-import { httpStatus, translateGoogleError } from './google-errors.js';
+import { isExpiredSyncToken, translateGoogleError } from './google-errors.js';
 import { assertCalDavWrite, type GoogleClientConfig } from './real-calendar.js';
 import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
 
@@ -180,8 +180,7 @@ export function createRealGoogleContacts(
         } while (pageToken);
       } catch (error) {
         // People API answers an expired token with HTTP 400 (EXPIRED_SYNC_TOKEN) or 410
-        const expired = syncToken && (httpStatus(error) === 410 || (error instanceof Error && error.message.includes('EXPIRED_SYNC_TOKEN')));
-        if (expired) {
+        if (syncToken && isExpiredSyncToken(error)) {
           throw new GoogleSyncTokenExpiredError();
         }
         throw error;

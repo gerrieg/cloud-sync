@@ -249,11 +249,34 @@ describe('the Google People adapter', () => {
     it.each([
       ['an HTTP 410', failure(410)],
       ['an EXPIRED_SYNC_TOKEN message', new Error('Sync token is expired. EXPIRED_SYNC_TOKEN')],
+      // As reported for the real API: HTTP 400, the reason only in the error details, the message without the constant
+      [
+        'an HTTP 400 with the text Google uses',
+        Object.assign(new Error('Sync token is expired. Clear local cache and retry call without the sync token.'), {
+          response: { status: 400, data: { error: { code: 400, message: 'Sync token is expired.' } } },
+        }),
+      ],
+      [
+        'an HTTP 400 whose details name the reason',
+        Object.assign(new Error('Request contains an invalid argument.'), {
+          response: {
+            status: 400,
+            data: { error: { code: 400, status: 'FAILED_PRECONDITION', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'EXPIRED_SYNC_TOKEN' }] } },
+          },
+        }),
+      ],
     ])('tells a stale token from %s', async (_name, error) => {
       const contacts = adapter(connections(vi.fn().mockRejectedValue(error)));
 
       await expect(contacts.listChanges('old')).rejects.toBeInstanceOf(GoogleSyncTokenExpiredError);
       await expect(contacts.listChanges(null)).rejects.toBe(error);
+    });
+
+    it('does not mistake any other HTTP 400 for a stale token', async () => {
+      const invalid = Object.assign(new Error('Request contains an invalid argument.'), { response: { status: 400, data: { error: { code: 400 } } } });
+      const contacts = adapter(connections(vi.fn().mockRejectedValue(invalid)));
+
+      await expect(contacts.listChanges('old')).rejects.toBe(invalid);
     });
 
     it('fails when Google does not hand out a new token', async () => {

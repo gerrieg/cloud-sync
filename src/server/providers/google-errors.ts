@@ -5,6 +5,24 @@ export function httpStatus(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined;
 }
 
+/**
+ * The People API refuses a sync token that is older than seven days. By its own documentation it names
+ * the reason `EXPIRED_SYNC_TOKEN` in the error details; reports say the status is 400 (not 410) and the
+ * message reads "Sync token is expired. ...", so all of these count.
+ */
+export function isExpiredSyncToken(error: unknown): boolean {
+  if (httpStatus(error) === 410) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : '';
+  const body = (error as { response?: { data?: unknown } } | null)?.response?.data;
+  return (
+    message.includes('EXPIRED_SYNC_TOKEN') ||
+    /sync token is expired/i.test(message) ||
+    (body !== undefined && JSON.stringify(body).includes('EXPIRED_SYNC_TOKEN'))
+  );
+}
+
 /** Google refuses the stored authorization (or the code to get one): it is dead and must be renewed. */
 export function isInvalidGrant(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) {
