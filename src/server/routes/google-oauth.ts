@@ -6,7 +6,8 @@ import type { AppConfig } from '../config.js';
 import { encryptSecret } from '../crypto/secrets.js';
 import type { AppDatabase } from '../db/index.js';
 import { findProfile, toProvidersContext, updateProfile } from '../profiles/profile-store.js';
-import { GOOGLE_INVALID_GRANT, GoogleAuthError, type SyncProvidersFactory } from '../providers/types.js';
+import type { SyncProvidersFactory } from '../providers/types.js';
+import { flagGoogleReauth } from '../sync/profile-runner.js';
 import { resolveGoogleRedirectUri } from '../profiles/google-redirect.js';
 import type { GoogleLinkOutcome } from '../../shared/profile.js';
 
@@ -61,8 +62,7 @@ export function createGoogleOAuthRoutes(deps: GoogleOAuthRouteDeps): Hono<{ Vari
       });
       return c.redirect(uiRedirect(row.id, 'connected'), 302);
     } catch (error) {
-      if (error instanceof GoogleAuthError && error.code === GOOGLE_INVALID_GRANT) {
-        updateProfile(db, row.id, { googleReauthRequired: true });
+      if (flagGoogleReauth(db, row.id, error)) {
         return c.redirect(uiRedirect(row.id, 'invalid_grant'), 302);
       }
       return c.redirect(uiRedirect(row.id, 'error'), 302);

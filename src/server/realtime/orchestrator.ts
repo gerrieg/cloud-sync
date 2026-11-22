@@ -9,23 +9,19 @@ import {
   isActive,
   listProfiles,
   toProvidersContext,
-  updateProfile,
   type ProfileRow,
 } from '../profiles/profile-store.js';
 import type { InboxIdleConnection } from '../providers/mail-types.js';
 import {
-  GOOGLE_INVALID_GRANT,
   GoogleAuthError,
   type SyncProviders,
   type SyncProvidersFactory,
 } from '../providers/types.js';
-import { isBidirectional } from '../sync/calendar-sync.js';
-import { listContactRules } from '../sync/contact-rules-store.js';
 import { pruneSyncLogs } from '../sync/log-retention.js';
-import { listMailRules } from '../sync/mail-rules-store.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
+import { pollingTargetsOf } from '../sync/polling-targets.js';
+import { flagGoogleReauth, ProfileRunner } from '../sync/profile-runner.js';
 import { runProfileSync, type SyncDomain } from '../sync/profile-sync.js';
-import { listRules } from '../sync/rules-store.js';
 import {
   deleteWatchChannel,
   insertWatchChannel,
@@ -97,7 +93,11 @@ export class RealtimeOrchestrator {
   private timer: NodeJS.Timeout | null = null;
   private lastLogPruneAt: number | null = null;
 
-  constructor(private readonly deps: RealtimeDeps) {}
+  private readonly runner: ProfileRunner;
+
+  constructor(private readonly deps: RealtimeDeps) {
+    this.runner = new ProfileRunner(deps);
+  }
 
   /** Starts ticking once per second. */
   start(): void {
@@ -150,9 +150,10 @@ export class RealtimeOrchestrator {
   }
 
   statusOf(profile: ProfileRow): ProfileStatusDto {
-    const wantsIdle = isActive(profile) && this.enabledMailRules(profile).length > 0;
+    const targets = pollingTargetsOf(this.deps.db, profile);
+    const wantsIdle = targets.appleMailFolders.length > 0;
     const connected = this.runtimes.get(profile.id)?.idle.connection != null;
-    const watched = this.watchedCalendarIds(profile);
+    const watched = targets.watchedGoogleCalendarIds;
     const healthy = this.healthyChannelCalendars(profile);
     return {
       mailIdle: !profile.enabled ? 'paused' : !wantsIdle ? 'disconnected' : connected ? 'connected' : 'reconnecting',
@@ -214,10 +215,6 @@ export class RealtimeOrchestrator {
     return runtime;
   }
 
-  private enabledMailRules(profile: ProfileRow) {
-    return listMailRules(this.deps.db, profile.id).filter((rule) => rule.enabled);
-  }
-
   private providersFor(profile: ProfileRow): SyncProviders {
     const context = toProvidersContext(profile, this.deps.config.encryptionKey);
     return this.deps.createSyncProviders(context);
@@ -226,21 +223,15 @@ export class RealtimeOrchestrator {
   private async tickProfile(profile: ProfileRow): Promise<void> {
     const runtime = this.runtimeOf(profile.id);
     const active = isActive(profile);
-    const mailRules = active ? this.enabledMailRules(profile) : [];
-    const calendarRules = active ? listRules(this.deps.db, profile.id).filter((rule) => rule.enabled) : [];
-    const contactRules = active ? listContactRules(this.deps.db, profile.id).filter((rule) => rule.enabled) : [];
-    const watched = this.watchedCalendarIds(profile);
+    const targets = pollingTargetsOf(this.deps.db, profile);
+    const watched = targets.watchedGoogleCalendarIds;
     await Promise.all([
-      this.step(profile, runtime, 'idle', () => this.maintainIdle(profile, runtime, mailRules.length > 0)),
-      this.step(profile, runtime, 'mail', () =>
-        this.pollMail(profile, runtime, [...new Set(mailRules.map((rule) => rule.appleFolderPath))]),
-      ),
+      this.step(profile, runtime, 'idle', () => this.maintainIdle(profile, runtime, targets.appleMailFolders.length > 0)),
+      this.step(profile, runtime, 'mail', () => this.pollMail(profile, runtime, targets.appleMailFolders)),
       this.step(profile, runtime, 'watch', () => this.maintainWatches(profile, runtime, active, watched)),
-      this.step(profile, runtime, 'ctag', () =>
-        this.pollCalendarTags(profile, runtime, calendarRules.map((rule) => rule.appleCalendarUrl)),
-      ),
+      this.step(profile, runtime, 'ctag', () => this.pollCalendarTags(profile, runtime, targets.appleCalendarUrls)),
       this.step(profile, runtime, 'google', () => this.pollGoogleCalendars(profile, runtime, watched)),
-      this.step(profile, runtime, 'contacts', () => this.pollContacts(profile, runtime, contactRules.length > 0)),
+      this.step(profile, runtime, 'contacts', () => this.pollContacts(profile, runtime, targets.hasContactRules)),
     ]);
   }
 
@@ -253,7 +244,7 @@ export class RealtimeOrchestrator {
     try {
       await work();
     } catch (error) {
-      if (!this.markReauthIfInvalidGrant(profile.id, error)) {
+      if (!flagGoogleReauth(this.deps.db, profile.id, error)) {
         console.error(`Real-time ${name} of Profile ${profile.id} failed:`, error);
       }
     } finally {
@@ -350,24 +341,6 @@ export class RealtimeOrchestrator {
     if (changed) {
       await this.requestSync(profile.id, 'mail');
     }
-  }
-
-  /** A dead Google authorization is recorded on the Profile; returns whether `error` was one. */
-  private markReauthIfInvalidGrant(profileId: string, error: unknown): boolean {
-    if (error instanceof GoogleAuthError && error.code === GOOGLE_INVALID_GRANT) {
-      updateProfile(this.deps.db, profileId, { googleReauthRequired: true });
-      return true;
-    }
-    return false;
-  }
-
-  /** Google calendars whose changes must reach Apple: the ones of enabled bidirectional rules. */
-  private watchedCalendarIds(profile: ProfileRow): string[] {
-    if (!isActive(profile)) {
-      return [];
-    }
-    const rules = listRules(this.deps.db, profile.id).filter((rule) => rule.enabled && isBidirectional(rule));
-    return [...new Set(rules.map((rule) => rule.googleCalendarId))];
   }
 
   /** Google calendars with a channel that is alive and that Google has proven to reach the webhook with. */
@@ -507,30 +480,17 @@ export class RealtimeOrchestrator {
   }
 
   private async syncNow(profileId: string, domain: SyncDomain): Promise<void> {
-    const { config, db, clock, createSyncProviders } = this.deps;
+    const { db, clock } = this.deps;
     const profile = findProfile(db, profileId);
     if (!profile || !profile.enabled || profile.googleReauthRequired) {
       return;
     }
-    const context = toProvidersContext(profile, config.encryptionKey);
-    if (!context.apple || !context.googleTokens) {
-      return;
-    }
     try {
-      await runProfileSync({
-        db,
-        clock,
-        profile,
-        appleId: context.apple.appleId,
-        providers: createSyncProviders(context),
-        domain,
-        dryRun: false,
-        force: false,
-      });
+      await this.runner.run(profile, (providers, current, appleId) =>
+        runProfileSync({ db, clock, profile: current, appleId, providers, domain, dryRun: false, force: false }),
+      );
     } catch (error) {
-      if (!this.markReauthIfInvalidGrant(profile.id, error)) {
-        console.error(`Background sync of Profile ${profile.id} failed:`, error);
-      }
+      console.error(`Background sync of Profile ${profile.id} failed:`, error);
     }
   }
 }
