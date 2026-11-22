@@ -85,6 +85,13 @@
       "when": 1795352298247,
       "tag": "0011_light_spiral",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795352868384,
+      "tag": "0012_recheck_contact_photos",
+      "breakpoints": true
     }
   ]
 }
