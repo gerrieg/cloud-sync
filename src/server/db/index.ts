@@ -46,7 +46,13 @@ export function createDatabase(
     sqlite,
     db,
     close() {
-      if (sqlite.open) {
+      if (!sqlite.open) {
+        return;
+      }
+      try {
+        // Fold the WAL back into the main file so a stopped container leaves one self-contained database
+        sqlite.pragma('wal_checkpoint(TRUNCATE)');
+      } finally {
         sqlite.close();
       }
     },

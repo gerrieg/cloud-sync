@@ -1,0 +1,25 @@
+services:
+  cloud-sync:
+    build: .
+    image: cloud-sync:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # The published port and the healthcheck below assume 3000; change HOST_PORT instead of PORT
+      PORT: "3000"
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    volumes:
+      # A bind mount (./data:/app/data) must be writable by uid 1000 (the node user): chown 1000:1000 ./data
+      - cloud-sync-data:/app/data
+    # Gives the app time to close IMAP IDLE connections and checkpoint SQLite before SIGKILL
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  cloud-sync-data:

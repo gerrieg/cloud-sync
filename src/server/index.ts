@@ -5,6 +5,7 @@ import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { ConfigError, parseConfig } from './config.js';
 import { createDatabase } from './db/index.js';
+import { createShutdown } from './shutdown.js';
 
 function resolveStaticDir(): string | undefined {
   const compiledClientDir = path.resolve(
@@ -49,17 +50,9 @@ function main(): void {
 
   console.log(`Cloud Sync listening on http://0.0.0.0:${config.port}`);
 
-  const shutdown = () => {
-    server.close(() => {
-      void realtime.stop().finally(() => {
-        dbContext.close();
-        process.exit(0);
-      });
-    });
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  const shutdown = createShutdown({ server, realtime, dbContext, exit: (code) => process.exit(code) });
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
 main();
