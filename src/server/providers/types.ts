@@ -81,6 +81,8 @@ export interface SyncProviders {
     };
     /** The single iCloud address book: contacts and contact groups are vCards in it. */
     readonly contacts: {
+      /** The collection tag alone (null when iCloud reports none): one cheap request, no vCards. */
+      ctag(): Promise<string | null>;
       list(): Promise<AppleContactBook>;
       /** Same contract as the calendar `putObject`: typed errors for 412 and 404. */
       putObject(input: AppleContactWrite): Promise<AppleObjectRef>;

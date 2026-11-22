@@ -19,3 +19,5 @@ export async function apiRequest<T>(path: string, init?: { method?: string; body
   }
   return data as T;
 }
+
+export const profilePath = (profileId: string) => `/api/profiles/${encodeURIComponent(profileId)}`;

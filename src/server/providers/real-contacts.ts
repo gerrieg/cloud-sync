@@ -22,16 +22,23 @@ type AppleContacts = SyncProviders['apple']['contacts'];
 type GoogleContacts = SyncProviders['google']['contacts'];
 
 export function createRealAppleContacts(credentials: AppleCredentials | null): AppleContacts {
+  // One DAV client per adapter: logging in (account discovery) happens once, not before every call.
+  // The address book itself is fetched per call, so its ctag is never stale.
+  let session: ReturnType<typeof createDAVClient> | undefined;
   async function connect() {
     if (!credentials) {
       throw new Error('No Apple credentials configured');
     }
-    const client = await createDAVClient({
+    session ??= createDAVClient({
       serverUrl: ICLOUD_CARDDAV_URL,
       credentials: { username: credentials.appleId, password: credentials.appPassword },
       authMethod: 'Basic',
       defaultAccountType: 'carddav',
+    }).catch((error: unknown) => {
+      session = undefined;
+      throw error;
     });
+    const client = await session;
     // iCloud keeps all contacts, and the contact groups as vCards, in one address book
     const addressBook = (await client.fetchAddressBooks())[0];
     if (!addressBook) {
@@ -40,12 +47,17 @@ export function createRealAppleContacts(credentials: AppleCredentials | null): A
     return { client, addressBook };
   }
 
+  const ctagOf = (addressBook: { ctag?: unknown }) => (typeof addressBook.ctag === 'string' ? addressBook.ctag : null);
+
   return {
+    async ctag() {
+      return ctagOf((await connect()).addressBook);
+    },
     async list(): Promise<AppleContactBook> {
       const { client, addressBook } = await connect();
       const cards = await client.fetchVCards({ addressBook });
       return {
-        ctag: typeof addressBook.ctag === 'string' ? addressBook.ctag : null,
+        ctag: ctagOf(addressBook),
         // A card without data stays in the list (as unreadable) so it is not taken for a deleted contact
         objects: cards.map((card) => ({
           href: card.url,
@@ -94,6 +106,8 @@ export function createRealGoogleContacts(
   /** Stands in for the Google client, for tests. */
   makeClient?: () => people_v1.People,
 ): GoogleContacts {
+  // One client per adapter: it refreshes the expired access token once, not before every call
+  let realClient: people_v1.People | undefined;
   function client(): people_v1.People {
     if (makeClient) {
       return makeClient();
@@ -101,9 +115,12 @@ export function createRealGoogleContacts(
     if (!tokens) {
       throw new Error('Google account is not connected');
     }
-    const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
-    auth.setCredentials({ ...tokens });
-    return google.people({ version: 'v1', auth });
+    if (!realClient) {
+      const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
+      auth.setCredentials({ ...tokens });
+      realClient = google.people({ version: 'v1', auth });
+    }
+    return realClient;
   }
 
   async function guarded<T>(call: (people: people_v1.People) => Promise<T>, resourceName?: string): Promise<T> {

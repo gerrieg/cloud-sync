@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  classifyRoute,
-  decideAccess,
-  sanitizeNextPath,
-} from '../../src/server/auth/access.js';
+import { classifyRoute, decideAccess } from '../../src/server/auth/access.js';
+import { sanitizeNextPath } from '../../src/shared/redirect.js';
 
 describe('classifyRoute', () => {
   it.each([

@@ -5,6 +5,7 @@ import {
   type ContactRuleCreate,
   type ContactRuleDto,
 } from '../../shared/contacts.js';
+import type { Clock } from '../clock.js';
 import type { AppConfig } from '../config.js';
 import type { AppDatabase } from '../db/index.js';
 import type { SyncProvidersFactory } from '../providers/types.js';
@@ -82,12 +83,13 @@ const contactRules: RuleKind<ContactRuleRow, ContactRuleOptions, ContactRuleDto>
 export interface ContactRouteDeps {
   readonly config: AppConfig;
   readonly db: AppDatabase;
+  readonly clock: Clock;
   readonly locks: ProfileLocks;
   readonly createSyncProviders: SyncProvidersFactory;
 }
 
 export function createContactRoutes(deps: ContactRouteDeps): Hono<ProfileEnv> {
-  const { db, locks } = deps;
+  const { db, clock, locks } = deps;
   const withConnectedProviders = createConnectedProviders(deps);
   const routes = new Hono<ProfileEnv>();
 
@@ -108,7 +110,7 @@ export function createContactRoutes(deps: ContactRouteDeps): Hono<ProfileEnv> {
     }),
   );
 
-  registerRuleRoutes(routes, contactRules, { db, locks, withConnectedProviders });
+  registerRuleRoutes(routes, contactRules, { db, clock, locks, withConnectedProviders });
 
   return routes;
 }

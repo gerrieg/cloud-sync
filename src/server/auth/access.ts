@@ -1,7 +1,5 @@
 import { sanitizeNextPath } from '../../shared/redirect.js';
 
-export { sanitizeNextPath };
-
 export type RouteCategory = 'public' | 'self_authenticated' | 'session_protected';
 
 export type AccessDecision =

@@ -138,7 +138,7 @@ export function createCalendarRoutes(deps: CalendarRouteDeps): Hono<ProfileEnv> 
     }),
   );
 
-  registerRuleRoutes(routes, calendarRules, { db, locks, withConnectedProviders });
+  registerRuleRoutes(routes, calendarRules, { db, clock, locks, withConnectedProviders });
 
   return routes;
 }

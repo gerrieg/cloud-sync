@@ -5,6 +5,7 @@ import {
   type MailRuleCreate,
   type MailRuleDto,
 } from '../../shared/mail.js';
+import type { Clock } from '../clock.js';
 import type { AppConfig } from '../config.js';
 import type { AppDatabase } from '../db/index.js';
 import type { AppleMailFolder } from '../providers/mail-types.js';
@@ -74,12 +75,13 @@ const mailRules: RuleKind<MailRuleRow, MailRulePatch, MailRuleDto> = {
 export interface MailRouteDeps {
   readonly config: AppConfig;
   readonly db: AppDatabase;
+  readonly clock: Clock;
   readonly locks: ProfileLocks;
   readonly createSyncProviders: SyncProvidersFactory;
 }
 
 export function createMailRoutes(deps: MailRouteDeps): Hono<ProfileEnv> {
-  const { db, locks } = deps;
+  const { db, clock, locks } = deps;
   const withConnectedProviders = createConnectedProviders(deps);
   const routes = new Hono<ProfileEnv>();
 
@@ -96,7 +98,7 @@ export function createMailRoutes(deps: MailRouteDeps): Hono<ProfileEnv> {
     }),
   );
 
-  registerRuleRoutes(routes, mailRules, { db, locks, withConnectedProviders });
+  registerRuleRoutes(routes, mailRules, { db, clock, locks, withConnectedProviders });
 
   return routes;
 }

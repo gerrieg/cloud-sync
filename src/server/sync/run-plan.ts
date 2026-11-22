@@ -1,8 +1,9 @@
+import type { LogEntityType } from '../../shared/logs.js';
 import type { Clock } from '../clock.js';
 import type { AppDatabase } from '../db/index.js';
 import { GoogleAuthError } from '../providers/types.js';
 import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
-import type { LoggedItem, SyncLog } from './sync-log-store.js';
+import { errorMessage, SyncLog, type LoggedItem } from './sync-log-store.js';
 
 /** One planned change: what it is, and (unless it is a no-op) how to carry it out. */
 export interface PlanEntryOf<Report extends LoggedItem, Deletion extends GuardedDeletion> {
@@ -19,10 +20,6 @@ export interface PlanOutcome<Report> {
   /** Set when the Delete Guard halted this run's deletions and queued them for approval. */
   readonly deleteApprovalId?: string;
   readonly actions: Report[];
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Sync failed';
 }
 
 /**
@@ -47,6 +44,38 @@ export function failedRun(
     failure.log.runFailed(failure.ruleId, failure.summary, error);
   }
   return errorMessage(error);
+}
+
+/**
+ * Runs a profile-wide sync (contacts, mail); when it fails as a whole, the failure is logged under
+ * `entityType` and becomes the error result.
+ */
+export async function runProfileWide<Result>(
+  run: {
+    readonly db: AppDatabase;
+    readonly clock: Clock;
+    readonly profileId: string;
+    readonly dryRun: boolean;
+    readonly entityType: LogEntityType;
+    readonly summary: string;
+  },
+  work: () => Promise<Result>,
+): Promise<Result | { readonly status: 'error'; readonly error: string; readonly actions: [] }> {
+  try {
+    return await work();
+  } catch (error) {
+    const log = new SyncLog(run.db, run.clock, run.profileId, run.entityType);
+    const message = failedRun({ log, dryRun: run.dryRun, ruleId: null, summary: run.summary }, error);
+    return { status: 'error', error: message, actions: [] };
+  }
+}
+
+/** A deletion the Delete Guard holds back is reported as skipped (the profile-wide syncs' `held`). */
+export function heldAsSkipped(
+  _entry: unknown,
+  deletion: GuardedDeletion,
+): { readonly report: { readonly action: 'skip'; readonly uid: string; readonly summary: string; readonly reason: 'delete_guard' } } {
+  return { report: { action: 'skip', uid: deletion.uid, summary: deletion.summary, reason: 'delete_guard' } };
 }
 
 /** Runs `work`, ignoring only the error that says the thing to change is already gone. */

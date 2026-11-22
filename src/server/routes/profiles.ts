@@ -24,7 +24,6 @@ import type { ProfileLocks } from '../sync/profile-locks.js';
 import { createCalendarRoutes } from './calendar-sync.js';
 import { createContactRoutes } from './contact-sync.js';
 import { createMailRoutes } from './mail-sync.js';
-import { createRuleRetryRoutes } from './rule-retry.js';
 import type { ProfileEnv } from './profile-context.js';
 
 export interface ProfileRouteDeps {
@@ -62,9 +61,8 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<ProfileEnv> {
   routes.use('/:id', loadProfile);
   routes.use('/:id/*', loadProfile);
   routes.route('/', createCalendarRoutes({ config, db, clock, locks, createSyncProviders }));
-  routes.route('/', createContactRoutes({ config, db, locks, createSyncProviders }));
-  routes.route('/', createMailRoutes({ config, db, locks, createSyncProviders }));
-  routes.route('/', createRuleRetryRoutes({ config, db, clock, locks, createSyncProviders }));
+  routes.route('/', createContactRoutes({ config, db, clock, locks, createSyncProviders }));
+  routes.route('/', createMailRoutes({ config, db, clock, locks, createSyncProviders }));
 
   routes.get('/', (c) => c.json(listProfiles(db).map(toProfileDto), 200));
 

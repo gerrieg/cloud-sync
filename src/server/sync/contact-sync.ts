@@ -32,7 +32,7 @@ import {
 import { contactRuleLabel } from './rule-labels.js';
 import { SyncLog } from './sync-log-store.js';
 import type { GuardedDeletion } from './delete-guard.js';
-import { carryOutPlan, failedRun, ignoringNotFound, type PlanEntryOf } from './run-plan.js';
+import { carryOutPlan, heldAsSkipped, ignoringNotFound, runProfileWide, type PlanEntryOf } from './run-plan.js';
 import { addGroupMember, buildVCard, displayName, mergeIntoVCard, parseVCard } from './vcard.js';
 
 export interface ContactSyncOptions {
@@ -545,13 +545,20 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
   }
 
   const cursor = getContactCursor(db, profile.id);
-  const raw = await providers.apple.contacts.list();
   const initialDone = enabled.every((rule) => rule.initialSyncCompletedAt !== null);
   const bidirectional = enabled.some((rule) => rule.direction === 'bidirectional');
-  // Google may have changed without Apple noticing, so only One-Way Sync can idle on the ctag
-  if (!bidirectional && !options.force && initialDone && raw.ctag !== null && raw.ctag === cursor.appleCtag) {
+  // Google may have changed without Apple noticing, so only One-Way Sync can idle on the ctag.
+  // The ctag is read on its own: an unchanged address book is not downloaded at all.
+  if (
+    !bidirectional &&
+    !options.force &&
+    initialDone &&
+    cursor.appleCtag !== null &&
+    (await providers.apple.contacts.ctag()) === cursor.appleCtag
+  ) {
     return { status: 'skipped', reason: 'unchanged', actions: [] };
   }
+  const raw = await providers.apple.contacts.list();
   const book = readAddressBook(raw);
   const log = new SyncLog(db, clock, profile.id, 'contact');
   for (const rule of enabled) {
@@ -582,9 +589,7 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
     dryRun: options.dryRun,
     entries: planned.entries,
     trackedItems: planned.trackedCount,
-    held: (_entry, deletion): PlanEntry => ({
-      report: { action: 'skip', uid: deletion.uid, summary: deletion.summary, reason: 'delete_guard' },
-    }),
+    held: heldAsSkipped,
     domain: 'contacts',
     approvalRuleId: null,
     recovered: [...enabled.map((rule) => rule.id), null],
@@ -611,13 +616,10 @@ export function invalidateContactSync(db: AppDatabase, profileId: string): void 
 
 /** Plans (and, unless `dryRun`, applies) the profile-wide contact sync; null when there are no contact rules. */
 export async function runContactSync(options: ContactSyncOptions): Promise<ContactRunResult | null> {
-  try {
-    return await run(options);
-  } catch (error) {
-    const log = new SyncLog(options.db, options.clock, options.profile.id, 'contact');
-    const message = failedRun({ log, dryRun: options.dryRun, ruleId: null, summary: 'Contact sync' }, error);
-    return { status: 'error', error: message, actions: [] };
-  }
+  return runProfileWide(
+    { db: options.db, clock: options.clock, profileId: options.profile.id, dryRun: options.dryRun, entityType: 'contact', summary: 'Contact sync' },
+    () => run(options),
+  );
 }
 
 /**

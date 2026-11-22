@@ -6,38 +6,15 @@ import type {
   ContactRunResult,
 } from '../../shared/contacts.js';
 import type { SyncRunResult } from '../../shared/calendar.js';
-import { apiRequest } from './http.js';
+import { apiRequest, profilePath } from './http.js';
+import { rulesApi } from './rules-api.js';
 
 export type { ContactGroupDiscovery, ContactRuleCreate, ContactRuleDto, ContactRuleUpdate, ContactRunResult };
 
-const profilePath = (profileId: string) => `/api/profiles/${encodeURIComponent(profileId)}`;
-
-export function discoverContactGroups(profileId: string): Promise<ContactGroupDiscovery> {
-  return apiRequest(`${profilePath(profileId)}/discover/contact-groups`);
-}
-
-export function listContactRules(profileId: string): Promise<ContactRuleDto[]> {
-  return apiRequest(`${profilePath(profileId)}/rules/contacts`);
-}
-
-export function createContactRule(profileId: string, rule: ContactRuleCreate): Promise<ContactRuleDto> {
-  return apiRequest(`${profilePath(profileId)}/rules/contacts`, { method: 'POST', body: rule });
-}
-
-export function updateContactRule(profileId: string, ruleId: string, patch: ContactRuleUpdate): Promise<ContactRuleDto> {
-  return apiRequest(`${profilePath(profileId)}/rules/contacts/${encodeURIComponent(ruleId)}`, {
-    method: 'PATCH',
-    body: patch,
-  });
-}
-
-/** Keeps the synced Google contacts unless `cleanupGoogle` is explicitly true. */
-export function deleteContactRule(profileId: string, ruleId: string, cleanupGoogle: boolean): Promise<void> {
-  return apiRequest(
-    `${profilePath(profileId)}/rules/contacts/${encodeURIComponent(ruleId)}?cleanupGoogle=${cleanupGoogle}`,
-    { method: 'DELETE' },
-  );
-}
+export const contactRulesApi = rulesApi<ContactRuleDto, ContactRuleCreate, ContactRuleUpdate, ContactGroupDiscovery>(
+  'contacts',
+  'contact-groups',
+);
 
 async function contactsOf(run: Promise<SyncRunResult>): Promise<ContactRunResult> {
   const result = await run;

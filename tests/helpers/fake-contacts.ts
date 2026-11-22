@@ -163,6 +163,10 @@ export class FakeContactWorld {
 
   appleContactsFor(appleId: string | null): SyncProviders['apple']['contacts'] {
     return {
+      ctag: async () => {
+        this.trace.push(`apple.contacts.ctag:${appleId}`);
+        return this.appleBook(appleId ?? '').ctag;
+      },
       list: async () => {
         this.trace.push(`apple.contacts:${appleId}`);
         const book = this.appleBook(appleId ?? '');

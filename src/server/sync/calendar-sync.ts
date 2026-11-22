@@ -76,6 +76,8 @@ interface Plan {
   readonly entries: PlanEntry[];
   /** Google delta cursor to persist after a fully successful run (bidirectional rules only). */
   readonly googleSyncToken: string | null;
+  /** Neither side changed since the last run, so the Apple calendar was not even listed. */
+  readonly unchanged?: true;
 }
 
 /** Read-only and subscribed Apple calendars can never receive Google changes. */
@@ -129,6 +131,20 @@ class RulePlanner {
     const { options, rule, apple } = this.context;
     const google = isBidirectional(rule) ? await this.readGoogleChanges() : null;
     const googleChanges = google?.changes ?? null;
+    // A bidirectional rule cannot idle on the Apple ctag alone (Google may have changed): once Google
+    // reports nothing either, the Apple calendar is not downloaded again
+    if (
+      googleChanges &&
+      !google?.fullListing &&
+      googleChanges.events.length === 0 &&
+      googleChanges.deletedIds.length === 0 &&
+      !options.force &&
+      rule.initialSyncCompletedAt !== null &&
+      apple.ctag !== null &&
+      apple.ctag === rule.appleCtag
+    ) {
+      return { entries: [], googleSyncToken: googleChanges.nextSyncToken ?? null, unchanged: true };
+    }
     const changedByGoogleId = new Map(
       (googleChanges?.events ?? []).filter((event) => !event.recurringEventId).map((event) => [event.id, event]),
     );
@@ -622,6 +638,12 @@ export async function executeCalendarDeletion(
 async function runRule(context: RuleContext): Promise<RuleRunResult> {
   const { options, rule, apple, log } = context;
   const plan = await new RulePlanner(context).plan();
+  if (plan.unchanged) {
+    if (!options.dryRun && plan.googleSyncToken !== null) {
+      updateRule(options.db, rule.id, { googleSyncToken: plan.googleSyncToken });
+    }
+    return { ruleId: rule.id, status: 'skipped', reason: 'unchanged', actions: [] };
+  }
   const outcome = await carryOutPlan({
     db: options.db,
     clock: options.clock,

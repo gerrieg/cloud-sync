@@ -69,10 +69,13 @@ describe('One-way contact sync HTTP seam', () => {
     await sync();
     const writes = world.googleWrites.length;
 
+    world.trace.length = 0;
     const again = await sync();
 
     expect(again).toMatchObject({ status: 'skipped', reason: 'unchanged', actions: [] });
     expect(world.googleWrites).toHaveLength(writes);
+    // The ctag alone settles it: the address book is not downloaded
+    expect(world.trace.filter((entry) => entry.startsWith('apple.contacts:'))).toEqual([]);
   });
 
   it('removes only the label when a contact leaves a synced group but stays in the address book', async () => {

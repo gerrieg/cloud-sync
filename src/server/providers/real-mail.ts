@@ -179,6 +179,8 @@ export function createRealGoogleMail(
   /** Stands in for the Google client, for tests. */
   makeClient?: () => gmail_v1.Gmail,
 ): GoogleMail {
+  // One client per adapter: it refreshes the expired access token once, not before every call
+  let realClient: gmail_v1.Gmail | undefined;
   function client(): gmail_v1.Gmail {
     if (makeClient) {
       return makeClient();
@@ -186,9 +188,12 @@ export function createRealGoogleMail(
     if (!tokens) {
       throw new Error('Google account is not connected');
     }
-    const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
-    auth.setCredentials({ ...tokens });
-    return google.gmail({ version: 'v1', auth });
+    if (!realClient) {
+      const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
+      auth.setCredentials({ ...tokens });
+      realClient = google.gmail({ version: 'v1', auth });
+    }
+    return realClient;
   }
 
   async function guarded<T>(call: (gmail: gmail_v1.Gmail) => Promise<T>, messageId?: string): Promise<T> {

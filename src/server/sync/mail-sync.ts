@@ -14,7 +14,7 @@ import type { SyncProviders } from '../providers/types.js';
 import { mailRuleLabel } from './rule-labels.js';
 import { SyncLog } from './sync-log-store.js';
 import type { GuardedDeletion } from './delete-guard.js';
-import { carryOutPlan, failedRun, ignoringNotFound, type PlanEntryOf } from './run-plan.js';
+import { carryOutPlan, heldAsSkipped, ignoringNotFound, runProfileWide, type PlanEntryOf } from './run-plan.js';
 import { messageKey } from './mail-key.js';
 import { listMailRules, type MailRuleRow } from './mail-rules-store.js';
 import {
@@ -492,9 +492,7 @@ async function run(options: MailSyncOptions): Promise<MailRunResult | null> {
     dryRun: options.dryRun,
     entries: await plan(options, rules, reads, rows, trash),
     trackedItems: rows.length,
-    held: (_entry, deletion): PlanEntry => ({
-      report: { action: 'skip', uid: deletion.uid, summary: deletion.summary, reason: 'delete_guard' },
-    }),
+    held: heldAsSkipped,
     domain: 'mail',
     approvalRuleId: null,
     recovered: [...enabled.map((rule) => rule.id), null],
@@ -515,13 +513,10 @@ async function run(options: MailSyncOptions): Promise<MailRunResult | null> {
 
 /** Plans (and, unless `dryRun`, applies) the profile-wide mail sync; null when there are no mail rules. */
 export async function runMailSync(options: MailSyncOptions): Promise<MailRunResult | null> {
-  try {
-    return await run(options);
-  } catch (error) {
-    const log = new SyncLog(options.db, options.clock, options.profile.id, 'email');
-    const message = failedRun({ log, dryRun: options.dryRun, ruleId: null, summary: 'Mail sync' }, error);
-    return { status: 'error', error: message, actions: [] };
-  }
+  return runProfileWide(
+    { db: options.db, clock: options.clock, profileId: options.profile.id, dryRun: options.dryRun, entityType: 'email', summary: 'Mail sync' },
+    () => run(options),
+  );
 }
 
 /** Deleting a rule keeps the synced Gmail messages: the sync only forgets that the folder is managed. */

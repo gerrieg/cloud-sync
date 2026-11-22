@@ -28,16 +28,23 @@ export interface GoogleClientConfig {
 }
 
 export function createRealAppleCalendars(credentials: AppleCredentials | null): AppleCalendars {
+  // One DAV client per adapter: logging in (account discovery) happens once, not before every call.
+  // The calendars themselves are fetched per call, so their ctags are never stale.
+  let session: ReturnType<typeof createDAVClient> | undefined;
   async function connect() {
     if (!credentials) {
       throw new Error('No Apple credentials configured');
     }
-    return createDAVClient({
+    session ??= createDAVClient({
       serverUrl: ICLOUD_CALDAV_URL,
       credentials: { username: credentials.appleId, password: credentials.appPassword },
       authMethod: 'Basic',
       defaultAccountType: 'caldav',
+    }).catch((error: unknown) => {
+      session = undefined;
+      throw error;
     });
+    return session;
   }
 
   return {
@@ -125,6 +132,8 @@ export function createRealGoogleCalendars(
   /** Stands in for the Google client, for tests. */
   makeClient?: () => calendar_v3.Calendar,
 ): GoogleCalendars {
+  // One client per adapter: it refreshes the expired access token once, not before every call
+  let realClient: calendar_v3.Calendar | undefined;
   function client(): calendar_v3.Calendar {
     if (makeClient) {
       return makeClient();
@@ -132,9 +141,12 @@ export function createRealGoogleCalendars(
     if (!tokens) {
       throw new Error('Google account is not connected');
     }
-    const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
-    auth.setCredentials({ ...tokens });
-    return google.calendar({ version: 'v3', auth });
+    if (!realClient) {
+      const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
+      auth.setCredentials({ ...tokens });
+      realClient = google.calendar({ version: 'v3', auth });
+    }
+    return realClient;
   }
 
   /** Occurrences of a series are separate Google events: find the one to override. */

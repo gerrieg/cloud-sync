@@ -267,6 +267,26 @@ describe('Bidirectional calendar sync (Apple Master) HTTP seam', () => {
     });
   });
 
+  describe('Idle polling', () => {
+    it('does not list the Apple calendar while neither side has changed, and wakes up on a Google edit', async () => {
+      const { api, world, profile } = await setupWithEvents(3);
+      await sync(api, profile); // settles the echo of the first run's own Google writes
+      world.trace.length = 0;
+
+      const idle = await sync(api, profile);
+
+      expect(idle.rules[0]).toMatchObject({ status: 'skipped', reason: 'unchanged', actions: [] });
+      expect(world.trace.filter((t) => t.startsWith('apple.objects'))).toEqual([]);
+
+      const edited = googleEvents(world).find((e) => e.summary === 'Termin 2')!;
+      world.editGoogleEvent(GOOGLE_REFRESH_TOKEN, 'primary', edited.id, { summary: 'Termin 2 (Google)' });
+      const woken = await sync(api, profile);
+
+      expect(woken.rules[0].status).toBe('ok');
+      expect(world.appleCalendarObject(APPLE_ID, HOME, 'e2.ics')!.ics).toContain('SUMMARY:Termin 2 (Google)');
+    });
+  });
+
   describe('Initial Sync', () => {
     it('imports unmatched Google events into Apple and links matched ones without duplicates', async () => {
       const ctx = await setup();

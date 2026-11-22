@@ -127,7 +127,8 @@ export class SyncLog {
   }
 }
 
-function errorMessage(error: unknown): string {
+/** The text of an error for the log and for the result of a run; an empty message counts as none. */
+export function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Sync failed';
 }
 

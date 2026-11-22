@@ -1,8 +1,10 @@
 import type { Context, Hono } from 'hono';
 import type { SyncDirection } from '../../shared/calendar.js';
+import type { Clock } from '../clock.js';
 import type { AppDatabase } from '../db/index.js';
 import { GoogleAuthError, type SyncProviders } from '../providers/types.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
+import { runProfileSync, type SyncDomain } from '../sync/profile-sync.js';
 import { dropOpenErrors } from '../sync/sync-log-store.js';
 import type { createConnectedProviders } from './connected-providers.js';
 import type { ProfileEnv } from './profile-context.js';
@@ -68,8 +70,8 @@ type CreateResult<Row> =
 
 /** What differs between the Sync Rules of calendars, contacts and mail; the lifecycle is shared. */
 export interface RuleKind<Row extends { readonly id: string; readonly profileId: string }, Patch, Dto> {
-  /** The path segment of the kind: `/:id/rules/<path>`. */
-  readonly path: string;
+  /** The path segment of the kind, `/:id/rules/<path>`, which is also the sync domain it runs in. */
+  readonly path: Exclude<SyncDomain, 'all'>;
   /** The message of the 502 when the rule's data could not be removed from Google. */
   readonly cleanupFailure: string;
   readonly parseOptions: (body: Record<string, unknown>) => Parsed<Patch>;
@@ -106,18 +108,21 @@ export interface RuleKind<Row extends { readonly id: string; readonly profileId:
 /**
  * `/:id/rules/<path>`: list, create, update and delete the Sync Rules of one kind. Deleting keeps
  * what was synced in Google unless `cleanupGoogle=true`, which removes it first and keeps the rule
- * when that fails.
+ * when that fails. `POST .../:ruleId/retry` runs the rule's sync right away: a calendar rule on its
+ * own, while contacts and mail sync profile-wide, so their whole domain runs. The sync log closes
+ * the errors of every item that succeeds.
  */
 export function registerRuleRoutes<Row extends { readonly id: string; readonly profileId: string }, Patch, Dto>(
   routes: Hono<ProfileEnv>,
   kind: RuleKind<Row, Patch, Dto>,
   deps: {
     readonly db: AppDatabase;
+    readonly clock: Clock;
     readonly locks: ProfileLocks;
     readonly withConnectedProviders: ReturnType<typeof createConnectedProviders>;
   },
 ): void {
-  const { db, locks, withConnectedProviders } = deps;
+  const { db, clock, locks, withConnectedProviders } = deps;
   const path = `/:id/rules/${kind.path}`;
 
   routes.get(path, (c) => c.json(kind.list(db, c.get('profile').id).map(kind.toDto), 200));
@@ -199,6 +204,34 @@ export function registerRuleRoutes<Row extends { readonly id: string; readonly p
           return c.json({ error: kind.cleanupFailure }, 502);
         }
         return finish();
+      },
+      { exclusive: true },
+    );
+  });
+
+  routes.post(`${path}/:ruleId/retry`, (c) => {
+    const ruleId = c.req.param('ruleId');
+    if (!kind.find(db, c.get('profile').id, ruleId)) {
+      return c.json({ error: 'Rule not found' }, 404);
+    }
+    return withConnectedProviders(
+      c,
+      async (providers, profile, appleId) => {
+        if (!profile.enabled) {
+          return c.json({ error: 'This Profile is paused' }, 409);
+        }
+        const result = await runProfileSync({
+          db,
+          clock,
+          profile,
+          appleId,
+          providers,
+          domain: kind.path,
+          dryRun: false,
+          force: false,
+          ruleId,
+        });
+        return c.json(result, 200);
       },
       { exclusive: true },
     );
