@@ -218,6 +218,97 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
     });
   });
 
+  describe('messages that are already in Gmail', () => {
+    const wipedDatabase = async () => {
+      const scenario = await setup();
+      await scenario.createRule('INBOX');
+      await scenario.createRule('Receipts');
+      return scenario;
+    };
+
+    it('links a message Gmail already holds instead of importing it again, and adds its label', async () => {
+      const { deliver, sync, gmail, world, token } = await wipedDatabase();
+      deliver('Receipts', 'Already there', { seen: true, messageId: '<Known@Example.com>' });
+      const existing = world.seedGmailMessage(token, rawMail({ subject: 'Already there', messageId: '<known@example.com>' }), ['INBOX']);
+
+      const result = await sync();
+
+      expect(result.actions).toEqual([expect.objectContaining({ action: 'skip', reason: 'matched_existing', summary: 'Already there' })]);
+      expect(world.googleWrites.filter((w) => w.kind === 'import')).toEqual([]);
+      expect(world.rawFetches).toEqual([]);
+      expect(gmail().map((m) => [m.id, m.labels])).toEqual([[existing, ['INBOX', 'Receipts']]]);
+    });
+
+    it('tracks the linked message: nothing happens again, and an iCloud deletion reaches that Gmail message', async () => {
+      const { deliver, sync, gmail, world, token, appleId } = await wipedDatabase();
+      for (let i = 1; i <= 6; i += 1) {
+        deliver('INBOX', `Filler ${i}`, { seen: true });
+      }
+      const uid = deliver('INBOX', 'Already there', { seen: true, messageId: '<known@example.com>' });
+      const existing = world.seedGmailMessage(token, rawMail({ subject: 'Already there', messageId: '<known@example.com>' }), ['INBOX']);
+      await sync();
+      const writes = world.googleWrites.length;
+
+      expect((await sync()).actions.filter((a) => a.action !== 'skip')).toEqual([]);
+      expect(world.googleWrites).toHaveLength(writes);
+
+      world.expunge(appleId, 'INBOX', uid);
+      expect((await sync()).actions.filter((a) => a.action !== 'skip')).toEqual([expect.objectContaining({ action: 'delete' })]);
+      expect(gmail().find((m) => m.id === existing)?.labels).toContain('TRASH');
+    });
+
+    it('still imports a message Gmail does not hold, and one that only sits in Gmail Trash', async () => {
+      const { deliver, sync, gmail, world, token } = await wipedDatabase();
+      deliver('INBOX', 'Brand new', { seen: true });
+      deliver('INBOX', 'Trashed there', { seen: true, messageId: '<trashed@example.com>' });
+      world.seedGmailMessage(token, rawMail({ subject: 'Trashed there', messageId: '<trashed@example.com>' }), ['TRASH']);
+
+      const result = await sync();
+
+      expect(result.actions.map((a) => a.action)).toEqual(['create', 'create']);
+      expect(gmail()).toHaveLength(3);
+    });
+
+    it('does not look for a message that has no Message-ID, since only the hash identifies it', async () => {
+      const { sync, gmail, world, appleId, token } = await wipedDatabase();
+      const raw = rawMail({ subject: 'No id', messageId: null });
+      world.deliver(appleId, 'INBOX', { raw, seen: true, internalDate: Date.UTC(2026, 0, 14) });
+      world.seedGmailMessage(token, raw, ['INBOX']);
+
+      await sync();
+
+      expect(world.messageIdLookups).toEqual([]);
+      expect(gmail()).toHaveLength(2);
+    });
+
+    it('looks a message that sits in several synced folders up once', async () => {
+      const { deliver, sync, world, appleId, token } = await wipedDatabase();
+      const uid = deliver('INBOX', 'Twice', { seen: true, messageId: '<twice@example.com>' });
+      world.copy(appleId, 'INBOX', uid, 'Receipts');
+      world.seedGmailMessage(token, rawMail({ subject: 'Twice', messageId: '<twice@example.com>' }), ['INBOX']);
+
+      await sync();
+
+      expect(world.messageIdLookups).toEqual(['twice@example.com']);
+    });
+
+    it('previews the link in a Dry-Run without writing anything', async () => {
+      const { deliver, dryRun, sync, gmail, world, token } = await wipedDatabase();
+      deliver('Receipts', 'Already there', { seen: true, messageId: '<known@example.com>' });
+      world.seedGmailMessage(token, rawMail({ subject: 'Already there', messageId: '<known@example.com>' }), ['INBOX']);
+
+      const preview = await dryRun();
+
+      expect(preview.actions).toEqual([expect.objectContaining({ action: 'skip', reason: 'matched_existing' })]);
+      expect(world.googleWrites).toEqual([]);
+      expect(gmail().map((m) => m.labels)).toEqual([['INBOX']]);
+
+      // Nothing was recorded: the real run still links it
+      expect((await sync()).actions).toEqual([expect.objectContaining({ reason: 'matched_existing' })]);
+      expect(gmail().map((m) => m.labels)).toEqual([['INBOX', 'Receipts']]);
+    });
+  });
+
   describe('moving between synced folders', () => {
     it('swaps the labels in place instead of importing the message again', async () => {
       const { createRule, deliver, sync, gmail, world, appleId } = await setup();
