@@ -307,6 +307,23 @@ describe('real-time calendar sync', () => {
       expect(s.world.googleEvents(GOOGLE_REFRESH_TOKEN, 'primary').map((e) => e.summary)).toEqual(['Neu']);
     });
 
+    it('syncs a rule that is created again for a calendar nothing changed in', async () => {
+      const s = await scenario({ direction: 'one_way', publicBaseUrl: null });
+      const events = () => s.world.googleEvents(GOOGLE_REFRESH_TOKEN, 'primary').map((e) => e.summary);
+      s.world.putAppleEvent(APPLE_ID, HOME, 'a.ics', simpleIcs('uid-a', 'Termin'));
+      await s.tick();
+      expect(events()).toEqual(['Termin']);
+
+      // Delete the rule together with its Google events, then create the same rule again
+      await s.api.request(`${s.rulePath}/${s.rule.id}?cleanupGoogle=true`, { method: 'DELETE' });
+      expect(events()).toEqual([]);
+      await s.tick(60_000);
+      await s.api.request(s.rulePath, { method: 'POST', body: { appleCalendarUrl: HOME, googleCalendarId: 'primary', direction: 'one_way' } });
+      await s.tick(1_000);
+
+      expect(events()).toEqual(['Termin']);
+    });
+
     it('does not read anything but the calendar list while no ctag changed', async () => {
       const s = await scenario({ direction: 'one_way', publicBaseUrl: null });
       await s.tick();

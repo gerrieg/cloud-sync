@@ -436,7 +436,16 @@ export class RealtimeOrchestrator {
   /** Reads the Apple calendar tags every 30s and syncs when one moved (the first look counts as a move). */
   private async pollCalendarTags(profile: ProfileRow, runtime: ProfileRuntime, calendarUrls: readonly string[]): Promise<void> {
     const now = this.deps.clock.now();
-    if (calendarUrls.length === 0 || (runtime.lastCtagPollAt !== null && now - runtime.lastCtagPollAt < CTAG_POLL_INTERVAL_MS)) {
+    // A calendar no enabled rule watches is forgotten: a rule that comes back (created again, enabled
+    // again) must count as a first look, or an unchanged ctag would leave it unsynced
+    for (const url of [...runtime.calendarCtags.keys()]) {
+      if (!calendarUrls.includes(url)) {
+        runtime.calendarCtags.delete(url);
+      }
+    }
+    const unseen = calendarUrls.some((url) => !runtime.calendarCtags.has(url));
+    const waiting = runtime.lastCtagPollAt !== null && now - runtime.lastCtagPollAt < CTAG_POLL_INTERVAL_MS;
+    if (calendarUrls.length === 0 || (waiting && !unseen)) {
       return;
     }
     runtime.lastCtagPollAt = now;
