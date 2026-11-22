@@ -234,9 +234,9 @@ describe('Calendar sync UI (fetch boundary)', () => {
         .filter((c) => c.method === 'POST' && /\/(sync|dry-run)$/.test(c.path))
         .map((c) => [c.path.split('/').pop(), c.body]);
       expect(runs).toEqual([
-        ['dry-run', {}],
-        ['sync', { force: false }],
-        ['sync', { force: true }],
+        ['dry-run', { domain: 'calendars' }],
+        ['sync', { domain: 'calendars', force: false }],
+        ['sync', { domain: 'calendars', force: true }],
       ]);
     });
   });

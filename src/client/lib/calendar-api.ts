@@ -16,9 +16,9 @@ export const calendarRulesApi = rulesApi<CalendarRuleDto, CalendarRuleCreate, Ca
 );
 
 export function runDryRun(profileId: string): Promise<SyncRunResult> {
-  return apiRequest(`${profilePath(profileId)}/dry-run`, { method: 'POST', body: {} });
+  return apiRequest(`${profilePath(profileId)}/dry-run`, { method: 'POST', body: { domain: 'calendars' } });
 }
 
 export function runSync(profileId: string, force: boolean): Promise<SyncRunResult> {
-  return apiRequest(`${profilePath(profileId)}/sync`, { method: 'POST', body: { force } });
+  return apiRequest(`${profilePath(profileId)}/sync`, { method: 'POST', body: { domain: 'calendars', force } });
 }
