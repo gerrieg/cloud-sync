@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const totpState = sqliteTable('totp_state', {
   id: integer('id').primaryKey(),
@@ -20,6 +20,8 @@ export const profiles = sqliteTable('profiles', {
   triggerTokenEnc: text('trigger_token_enc').notNull(),
   lastSyncAt: integer('last_sync_at'),
   lastSyncStatus: text('last_sync_status'),
+  /** When a sync run last finished without errors; unlike `lastSyncAt`, failed runs do not move it. */
+  lastSuccessfulSyncAt: integer('last_successful_sync_at'),
 });
 
 export const calendarSyncRules = sqliteTable(
@@ -210,6 +212,31 @@ export const googleWatchChannels = sqliteTable('google_watch_channels', {
   /** When Google first reached the webhook through this channel; null while that is unproven. */
   confirmedAt: integer('confirmed_at'),
 });
+
+/** The sync log: carried-over changes (`info`) and items that failed to sync (`error`). */
+export const syncLogs = sqliteTable(
+  'sync_logs',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    /** Id of a calendar, contact or mail Sync Rule (see `entityType`); null when not attributable to one rule. */
+    ruleId: text('rule_id'),
+    entityType: text('entity_type', { enum: ['calendar', 'contact', 'email'] }).notNull(),
+    level: text('level', { enum: ['info', 'error'] }).notNull(),
+    action: text('action'),
+    /** Event UID, contact UID or message key; null for errors of a whole rule or run. */
+    itemKey: text('item_key'),
+    summary: text('summary').notNull(),
+    message: text('message').notNull().default(''),
+    /** Time of the entry; a repeated error updates it to its latest occurrence. */
+    createdAt: integer('created_at').notNull(),
+    /** Set when a later run succeeded for the item; null while an error is open. */
+    resolvedAt: integer('resolved_at'),
+  },
+  (table) => [index('sync_logs_profile_created_idx').on(table.profileId, table.createdAt)],
+);
 
 export const pendingDeleteApprovals = sqliteTable('pending_delete_approvals', {
   id: text('id').primaryKey(),

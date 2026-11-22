@@ -20,6 +20,7 @@ import {
 } from '../sync/mail-rules-store.js';
 import { forgetRuleFolder, removeRuleFromGoogle } from '../sync/mail-sync.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
+import { dropOpenErrors } from '../sync/sync-log-store.js';
 import { createConnectedProviders } from './connected-providers.js';
 import type { ProfileEnv } from './profile-context.js';
 
@@ -161,6 +162,7 @@ export function createMailRoutes(deps: MailRouteDeps): Hono<ProfileEnv> {
       return locks.run(profileId, async () => {
         forgetRuleFolder(db, profileId, rule);
         deleteMailRule(db, rule.id);
+        dropOpenErrors(db, rule.id);
         return c.body(null, 204);
       });
     }
@@ -178,6 +180,7 @@ export function createMailRoutes(deps: MailRouteDeps): Hono<ProfileEnv> {
         }
         forgetRuleFolder(db, profileId, rule);
         deleteMailRule(db, rule.id);
+        dropOpenErrors(db, rule.id);
         return c.body(null, 204);
       },
       { exclusive: true },

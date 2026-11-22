@@ -11,7 +11,7 @@ import { redirectTo } from '../../src/client/lib/navigation.js';
 
 describe('Profile management UI (fetch boundary)', () => {
   beforeEach(() => {
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/?view=profile');
   });
 
   afterEach(() => {

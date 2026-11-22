@@ -241,6 +241,11 @@ export class FakeMailWorld {
     this.importFailures.push({ match, error });
   }
 
+  /** Gmail accepts every message again. */
+  clearImportRejections(): void {
+    this.importFailures = [];
+  }
+
   // ---- Provider views ----------------------------------------------------------------------
 
   appleMailFor(appleId: string | null): SyncProviders['apple']['mail'] {

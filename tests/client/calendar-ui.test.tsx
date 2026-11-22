@@ -123,7 +123,7 @@ async function openPanel(initialRules: CalendarRuleDto[] = []) {
 
 describe('Calendar sync UI (fetch boundary)', () => {
   beforeEach(() => {
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/?view=profile');
   });
 
   afterEach(() => {

@@ -22,6 +22,7 @@ import {
 import { forgetRuleLabel, removeRuleFromGoogle } from '../sync/contact-sync.js';
 import { setContactCursor } from '../sync/contact-store.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
+import { dropOpenErrors } from '../sync/sync-log-store.js';
 import { createConnectedProviders } from './connected-providers.js';
 import type { ProfileEnv } from './profile-context.js';
 
@@ -164,6 +165,7 @@ export function createContactRoutes(deps: ContactRouteDeps): Hono<ProfileEnv> {
     }
     const finish = () => {
       deleteContactRule(db, rule.id);
+      dropOpenErrors(db, rule.id);
       setContactCursor(db, profileId, { appleCtag: null });
       return c.body(null, 204);
     };

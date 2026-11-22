@@ -29,6 +29,8 @@ import {
   updateSyncedContact,
   type SyncedContactRow,
 } from './contact-store.js';
+import { contactRuleLabel } from './rule-labels.js';
+import { SyncLog } from './sync-log-store.js';
 import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
 import { addGroupMember, buildVCard, displayName, mergeIntoVCard, parseVCard } from './vcard.js';
 
@@ -103,6 +105,11 @@ export async function executeContactDeletion(
   deleteSyncedContact(db, item.syncedContactId);
 }
 
+/** Whether the rule's Apple group (or "All Contacts") holds the contact. */
+function ruleClaims(book: ReturnType<typeof readAddressBook>, rule: ContactRuleRow, uid: string): boolean {
+  return rule.appleGroupUid === ALL_CONTACTS_GROUP || (book.groups.get(rule.appleGroupUid)?.card.memberUids.includes(uid) ?? false);
+}
+
 function plan(
   options: ContactSyncOptions,
   rules: ContactRuleRow[],
@@ -113,8 +120,7 @@ function plan(
   const rows = listSyncedContacts(db, profile.id);
   const tracked = new Map(rows.map((row) => [row.appleContactUid, row]));
 
-  const claims = (rule: ContactRuleRow, uid: string) =>
-    rule.appleGroupUid === ALL_CONTACTS_GROUP || (book.groups.get(rule.appleGroupUid)?.card.memberUids.includes(uid) ?? false);
+  const claims = (rule: ContactRuleRow, uid: string) => ruleClaims(book, rule, uid);
   const enabled = rules.filter((rule) => rule.enabled);
   const inScope = (uid: string) => enabled.some((rule) => claims(rule, uid));
   const enabledLabels = new Set(enabled.map((rule) => rule.googleGroupResourceName));
@@ -556,13 +562,14 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
     return { status: 'skipped', reason: 'unchanged', actions: [] };
   }
   const book = readAddressBook(raw);
+  const log = new SyncLog(db, clock, profile.id, 'contact');
   for (const rule of enabled) {
     if (rule.appleGroupUid !== ALL_CONTACTS_GROUP && !book.groups.has(rule.appleGroupUid)) {
-      return {
-        status: 'error',
-        error: `The Apple contact group "${rule.appleGroupName}" no longer exists`,
-        actions: [],
-      };
+      const error = `The Apple contact group "${rule.appleGroupName}" no longer exists`;
+      if (!options.dryRun) {
+        log.runFailed(rule.id, contactRuleLabel(rule), new Error(error));
+      }
+      return { status: 'error', error, actions: [] };
     }
   }
 
@@ -592,18 +599,36 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
       : undefined;
   const withApproval = deleteApprovalId ? { deleteApprovalId } : {};
 
+  for (const rule of [...enabled, null]) {
+    log.runRecovered(rule?.id ?? null);
+  }
+  // A contact belongs to the rule whose group holds it, or else to the rule whose label it carries
+  const syncedLabels = new Map(listSyncedContacts(db, profile.id).map((row) => [row.appleContactUid, parseLabels(row)]));
+  const ruleIdOf = (uid: string): string | null =>
+    (
+      enabled.find((rule) => ruleClaims(book, rule, uid)) ??
+      rules.find((rule) => syncedLabels.get(uid)?.includes(rule.googleGroupResourceName))
+    )?.id ?? null;
+
+  // One contact that cannot be carried over must not hold up all the others
   const applied: PlannedContactAction[] = [];
-  try {
-    for (const entry of entries) {
+  let failure: string | null = null;
+  for (const entry of entries) {
+    try {
       await entry.apply?.();
       applied.push(entry.report);
+      log.applied(ruleIdOf(entry.report.uid), entry.report);
+    } catch (error) {
+      if (error instanceof GoogleAuthError) {
+        throw error;
+      }
+      failure ??= error instanceof Error ? error.message : 'Sync failed';
+      log.failed(ruleIdOf(entry.report.uid), entry.report, error);
     }
-  } catch (error) {
-    if (error instanceof GoogleAuthError) {
-      throw error;
-    }
-    // Keep what was done so far visible; the cursor stays put so the next run finishes the job
-    return { status: 'error', error: error instanceof Error ? error.message : 'Sync failed', ...withApproval, actions: applied };
+  }
+  if (failure !== null) {
+    // The cursor stays put so the next run tries the failed contacts again
+    return { status: 'error', error: failure, ...withApproval, actions: applied };
   }
 
   // Only a fully successful run advances the cursor
@@ -624,6 +649,9 @@ export async function runContactSync(options: ContactSyncOptions): Promise<Conta
   } catch (error) {
     if (error instanceof GoogleAuthError) {
       throw error;
+    }
+    if (!options.dryRun) {
+      new SyncLog(options.db, options.clock, options.profile.id, 'contact').runFailed(null, 'Contact sync', error);
     }
     return { status: 'error', error: error instanceof Error ? error.message : 'Sync failed', actions: [] };
   }

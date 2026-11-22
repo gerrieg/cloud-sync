@@ -11,6 +11,7 @@ import { GoogleAuthError, type SyncProvidersFactory } from '../providers/types.j
 import { removeTrackedGoogleEvents } from '../sync/calendar-sync.js';
 import { listPendingApprovals, toApprovalDto } from '../sync/delete-guard.js';
 import { runProfileSync } from '../sync/profile-sync.js';
+import { dropOpenErrors } from '../sync/sync-log-store.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
 import {
   findRule,
@@ -222,6 +223,7 @@ export function createCalendarRoutes(deps: CalendarRouteDeps): Hono<ProfileEnv> 
     if (cleanup !== 'true') {
       return locks.run(profileId, async () => {
         deleteRule(db, rule.id);
+        dropOpenErrors(db, rule.id);
         return c.body(null, 204);
       });
     }
@@ -239,6 +241,7 @@ export function createCalendarRoutes(deps: CalendarRouteDeps): Hono<ProfileEnv> 
           return c.json({ error: 'Could not remove the synced events from Google; the rule was kept' }, 502);
         }
         deleteRule(db, rule.id);
+        dropOpenErrors(db, rule.id);
         return c.body(null, 204);
       },
       { exclusive: true },

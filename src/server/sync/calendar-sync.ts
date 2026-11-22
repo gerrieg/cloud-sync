@@ -2,7 +2,6 @@ import type { PlannedAction, RuleRunResult, SyncRunResult } from '../../shared/c
 import type { Clock } from '../clock.js';
 import type { AppDatabase } from '../db/index.js';
 import type { ProfileRow } from '../profiles/profile-store.js';
-import { updateProfile } from '../profiles/profile-store.js';
 import {
   AppleObjectNotFoundError,
   ApplePreconditionFailedError,
@@ -22,6 +21,8 @@ import { googleFingerprint, googleStartKey } from './google-events.js';
 import { googleEventToIcs, patchIcsWithGoogle } from './google-ics.js';
 import { translateIcs, type TranslatedCalendarObject } from './ics.js';
 import { listRules, updateRule, type RuleRow } from './rules-store.js';
+import { calendarRuleLabel } from './rule-labels.js';
+import { SyncLog } from './sync-log-store.js';
 import {
   deleteSyncedEvent,
   insertSyncedEvent,
@@ -45,6 +46,8 @@ export interface CalendarSyncOptions {
   readonly dryRun: boolean;
   /** Force-Resync: ignore ctag/ETag shortcuts and push every Apple event again. */
   readonly force: boolean;
+  /** Run only this Sync Rule (the rest of the Profile's rules are left alone). */
+  readonly ruleId?: string;
 }
 
 /** One planned deletion: everything needed to carry it out later, e.g. after an admin approval. */
@@ -71,6 +74,7 @@ interface RuleContext {
   readonly options: CalendarSyncOptions;
   readonly rule: RuleRow;
   readonly apple: AppleCalendarInfo;
+  readonly log: SyncLog;
 }
 
 interface Plan {
@@ -648,6 +652,7 @@ async function runRule(context: RuleContext): Promise<RuleRunResult> {
   if (options.dryRun) {
     return { ruleId: rule.id, status: 'ok', actions: entries.map((entry) => entry.report) };
   }
+  context.log.runRecovered(rule.id);
   const deleteApprovalId =
     guarded.batch.length > 0
       ? queueDeletions(options.db, {
@@ -659,21 +664,28 @@ async function runRule(context: RuleContext): Promise<RuleRunResult> {
         }).id
       : undefined;
 
+  // One event that cannot be carried over must not hold up all the others
   const applied: PlannedAction[] = [];
-  try {
-    for (const entry of entries) {
+  let failure: string | null = null;
+  for (const entry of entries) {
+    try {
       await entry.apply?.();
       applied.push(entry.report);
+      context.log.applied(rule.id, entry.report);
+    } catch (error) {
+      if (error instanceof GoogleAuthError) {
+        throw error;
+      }
+      failure ??= error instanceof Error ? error.message : 'Sync failed';
+      context.log.failed(rule.id, entry.report, error);
     }
-  } catch (error) {
-    if (error instanceof GoogleAuthError) {
-      throw error;
-    }
-    // Keep what was done so far visible; the cursor stays put so the next run finishes the job
+  }
+  if (failure !== null) {
+    // The cursor stays put so the next run tries the failed events again
     return {
       ruleId: rule.id,
       status: 'error',
-      error: error instanceof Error ? error.message : 'Sync failed',
+      error: failure,
       ...(deleteApprovalId ? { deleteApprovalId } : {}),
       actions: applied,
     };
@@ -693,20 +705,20 @@ export async function runCalendarSync(options: CalendarSyncOptions): Promise<Syn
   const { db, clock, profile, providers } = options;
   const appleCalendars = await providers.apple.calendars.list();
   const results: RuleRunResult[] = [];
+  const log = new SyncLog(db, clock, profile.id, 'calendar');
 
-  for (const rule of listRules(db, profile.id)) {
+  for (const rule of listRules(db, profile.id).filter((candidate) => options.ruleId === undefined || candidate.id === options.ruleId)) {
     if (!rule.enabled) {
       results.push({ ruleId: rule.id, status: 'skipped', reason: 'paused', actions: [] });
       continue;
     }
     const apple = appleCalendars.find((calendar) => calendar.url === rule.appleCalendarUrl);
     if (!apple) {
-      results.push({
-        ruleId: rule.id,
-        status: 'error',
-        error: 'The Apple calendar no longer exists',
-        actions: [],
-      });
+      const error = 'The Apple calendar no longer exists';
+      results.push({ ruleId: rule.id, status: 'error', error, actions: [] });
+      if (!options.dryRun) {
+        log.runFailed(rule.id, calendarRuleLabel(rule), new Error(error));
+      }
       continue;
     }
     const unchanged =
@@ -721,10 +733,13 @@ export async function runCalendarSync(options: CalendarSyncOptions): Promise<Syn
     }
 
     try {
-      results.push(await runRule({ options, rule, apple }));
+      results.push(await runRule({ options, rule, apple, log }));
     } catch (error) {
       if (error instanceof GoogleAuthError) {
         throw error;
+      }
+      if (!options.dryRun) {
+        log.runFailed(rule.id, calendarRuleLabel(rule), error);
       }
       results.push({
         ruleId: rule.id,
@@ -735,12 +750,6 @@ export async function runCalendarSync(options: CalendarSyncOptions): Promise<Syn
     }
   }
 
-  if (!options.dryRun) {
-    updateProfile(db, profile.id, {
-      lastSyncAt: clock.now(),
-      lastSyncStatus: results.every((result) => result.status !== 'error') ? 'ok' : 'error',
-    });
-  }
   return { dryRun: options.dryRun, rules: results };
 }
 

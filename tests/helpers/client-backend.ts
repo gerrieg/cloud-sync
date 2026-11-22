@@ -10,6 +10,7 @@ export interface ProfileFixture {
   googleReauthRequired: boolean;
   lastSyncAt: number | null;
   lastSyncStatus: string | null;
+  lastSuccessfulSyncAt: number | null;
 }
 
 export function profile(overrides: Partial<ProfileFixture> & { id: string; name: string }): ProfileFixture {
@@ -21,6 +22,7 @@ export function profile(overrides: Partial<ProfileFixture> & { id: string; name:
     googleReauthRequired: false,
     lastSyncAt: null,
     lastSyncStatus: null,
+    lastSuccessfulSyncAt: null,
     ...overrides,
   };
 }
@@ -70,6 +72,13 @@ export function installBackend(initial: ProfileFixture[], extra?: (call: Recorde
       return json({ mailIdle: 'disconnected', googleCalendar: 'inactive' });
     }
 
+    if (method === 'GET' && path === '/api/overview') {
+      return json(
+        profiles.map((p) => ({ profile: p, status: { mailIdle: 'disconnected', googleCalendar: 'inactive' }, openErrors: 0 })),
+      );
+    }
+    if (method === 'GET' && path.startsWith('/api/logs')) return json([]);
+
     if (path === '/api/auth/me') return json({ username: 'admin' });
     if (path === '/api/auth/logout') return json({ ok: true });
     if (path === '/api/profiles' && method === 'GET') return json(profiles);
@@ -96,4 +105,38 @@ export function installBackend(initial: ProfileFixture[], extra?: (call: Recorde
 
   vi.stubGlobal('fetch', fetchMock);
   return { profiles, calls };
+}
+
+export interface LogFixture {
+  id: string;
+  profileId: string;
+  profileName: string;
+  ruleId: string | null;
+  ruleName: string | null;
+  entityType: 'calendar' | 'contact' | 'email';
+  level: 'info' | 'error';
+  action: string | null;
+  itemKey: string | null;
+  summary: string;
+  message: string;
+  createdAt: number;
+  resolvedAt: number | null;
+}
+
+export function logEntry(overrides: Partial<LogFixture> & { id: string }): LogFixture {
+  return {
+    profileId: 'a',
+    profileName: 'Anna',
+    ruleId: 'r1',
+    ruleName: 'Privat → Anna',
+    entityType: 'calendar',
+    level: 'error',
+    action: 'create',
+    itemKey: overrides.id,
+    summary: 'Zahnarzt',
+    message: 'Google is down',
+    createdAt: Date.UTC(2026, 0, 15, 12, 0, 0),
+    resolvedAt: null,
+    ...overrides,
+  };
 }

@@ -61,6 +61,7 @@ export class FakeContactWorld {
   private readonly google = new Map<string, GoogleBook>();
   private beforeNextApplePut: (() => void) | null = null;
   private photoFailure: Error | null = null;
+  private readonly writeRejections: { givenName: string; error: Error }[] = [];
   private counter = 0;
 
   // ---- Apple -------------------------------------------------------------------------------
@@ -138,6 +139,15 @@ export class FakeContactWorld {
     this.drop(this.googleBook(refreshToken), resourceName);
   }
 
+  /** Google refuses to create or change contacts with this given name until `clearWriteRejections` is called. */
+  rejectGoogleWritesFor(givenName: string, error: Error = new Error('Google rejected the contact')): void {
+    this.writeRejections.push({ givenName, error });
+  }
+
+  clearWriteRejections(): void {
+    this.writeRejections.length = 0;
+  }
+
   /** Makes the next photo upload fail once. */
   failNextPhotoUpload(error: Error): void {
     this.photoFailure = error;
@@ -210,6 +220,12 @@ export class FakeContactWorld {
       }
       return this.googleBook(token);
     };
+    const rejectIfMarked = (data: { givenName: string } | undefined) => {
+      const rejection = this.writeRejections.find(({ givenName }) => givenName === data?.givenName);
+      if (rejection) {
+        throw rejection.error;
+      }
+    };
     const applyGroups = (stored: { groups: Set<string> }, write: { addGroups: readonly string[]; removeGroups: readonly string[] }) => {
       write.addGroups.forEach((g) => stored.groups.add(g));
       write.removeGroups.forEach((g) => stored.groups.delete(g));
@@ -238,6 +254,7 @@ export class FakeContactWorld {
         };
       },
       create: async (write) => {
+        rejectIfMarked(write.data);
         const b = book();
         const resourceName = this.next('people/c');
         const stored = { data: write.data ?? contactData(), groups: new Set<string>(), photo: null };
@@ -247,6 +264,7 @@ export class FakeContactWorld {
         return this.googleContact(token, resourceName)!;
       },
       update: async (resourceName, write) => {
+        rejectIfMarked(write.data);
         const b = book();
         const existing = b.contacts.get(resourceName);
         if (!existing) {

@@ -111,7 +111,7 @@ async function openPanel(options?: Parameters<typeof contactsBackend>[0]) {
 
 describe('Contact sync UI (fetch boundary)', () => {
   beforeEach(() => {
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/?view=profile');
   });
 
   afterEach(() => {

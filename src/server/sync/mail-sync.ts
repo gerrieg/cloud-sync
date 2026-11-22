@@ -11,6 +11,8 @@ import {
   type AppleMailMessage,
 } from '../providers/mail-types.js';
 import { GoogleAuthError, type SyncProviders } from '../providers/types.js';
+import { mailRuleLabel } from './rule-labels.js';
+import { SyncLog } from './sync-log-store.js';
 import { holdBackDeletions, queueDeletions, type GuardedDeletion } from './delete-guard.js';
 import { messageKey } from './mail-key.js';
 import { listMailRules, type MailRuleRow } from './mail-rules-store.js';
@@ -56,6 +58,8 @@ interface PlanEntry {
   readonly report: PlannedMailAction;
   readonly apply?: () => Promise<void>;
   readonly deletion?: MailDeletion;
+  /** The rule of the folder the message sits in, for the sync log; absent when not attributable. */
+  readonly ruleId?: string;
 }
 
 /** One copy of a message in a synced iCloud folder. */
@@ -283,6 +287,7 @@ async function plan(
       const summary = subjects.get(key) ?? noSubject;
       entries.push({
         report: report('create', key, summary),
+        ruleId: first.rule.id,
         apply: async () => {
           const googleMessageId = await importCopy(first, labelNames);
           insertSyncedEmail(db, {
@@ -331,6 +336,7 @@ async function plan(
     const reason = restored ? 'restored_from_trash' : labelsChanged ? 'moved' : flagsChanged ? 'flags_changed' : 'force_resync';
     entries.push({
       report: report('update', key, row.summary, reason),
+      ruleId: first.rule.id,
       apply: async () => {
         if (restored) {
           await ignoreGmailNotFound(() => providers.google.mail.untrash(row.googleMessageId));
@@ -374,7 +380,12 @@ async function plan(
 
     const deletion = (reason: string, behavior: MailDeleteBehavior): PlanEntry => {
       const item = mailDeletion(row, behavior);
-      return { report: report('delete', row.messageIdKey, row.summary, reason), apply: () => executeMailDeletion({ db, providers }, item), deletion: item };
+      return {
+        report: report('delete', row.messageIdKey, row.summary, reason),
+        ...(originRules[0] ? { ruleId: originRules[0].id } : {}),
+        apply: () => executeMailDeletion({ db, providers }, item),
+        deletion: item,
+      };
     };
 
     if (row.trashUid !== null) {
@@ -413,6 +424,7 @@ async function plan(
     if (trashedAs !== undefined) {
       entries.push({
         report: report('update', row.messageIdKey, row.summary, 'moved_to_trash'),
+        ...(originRules[0] ? { ruleId: originRules[0].id } : {}),
         apply: async () => {
           await ignoreGmailNotFound(() => providers.google.mail.trash(row.googleMessageId));
           updateSyncedEmail(db, row.id, { trashUid: trashedAs });
@@ -436,6 +448,7 @@ async function run(options: MailSyncOptions): Promise<MailRunResult | null> {
     return { status: 'skipped', reason: 'paused', actions: [] };
   }
 
+  const log = new SyncLog(db, clock, profile.id, 'email');
   const states = listMailFolderStates(db, profile.id);
   const reads: FolderRead[] = [];
   for (const rule of enabled) {
@@ -445,7 +458,11 @@ async function run(options: MailSyncOptions): Promise<MailRunResult | null> {
       reads.push({ rule, listing, revalidated: state !== undefined && state.uidValidity !== listing.uidValidity });
     } catch (error) {
       if (error instanceof AppleMailFolderNotFoundError) {
-        return { status: 'error', error: `The Apple mail folder "${rule.appleFolderName}" no longer exists`, actions: [] };
+        const message = `The Apple mail folder "${rule.appleFolderName}" no longer exists`;
+        if (!options.dryRun) {
+          log.runFailed(rule.id, mailRuleLabel(rule), new Error(message));
+        }
+        return { status: 'error', error: message, actions: [] };
       }
       throw error;
     }
@@ -491,6 +508,9 @@ async function run(options: MailSyncOptions): Promise<MailRunResult | null> {
       ? queueDeletions(db, { profileId: profile.id, domain: 'mail', ruleId: null, items: guarded.batch, now: clock.now() }).id
       : undefined;
   const withApproval = deleteApprovalId ? { deleteApprovalId } : {};
+  for (const rule of [...enabled, null]) {
+    log.runRecovered(rule?.id ?? null);
+  }
 
   // One message that cannot be carried over (say, Gmail rejects it) must not hold up all the others
   const applied: PlannedMailAction[] = [];
@@ -499,11 +519,13 @@ async function run(options: MailSyncOptions): Promise<MailRunResult | null> {
     try {
       await entry.apply?.();
       applied.push(entry.report);
+      log.applied(entry.ruleId ?? null, entry.report);
     } catch (error) {
       if (error instanceof GoogleAuthError) {
         throw error;
       }
       failure ??= error instanceof Error ? error.message : 'Sync failed';
+      log.failed(entry.ruleId ?? null, entry.report, error);
     }
   }
   if (failure !== null) {
@@ -530,6 +552,9 @@ export async function runMailSync(options: MailSyncOptions): Promise<MailRunResu
   } catch (error) {
     if (error instanceof GoogleAuthError) {
       throw error;
+    }
+    if (!options.dryRun) {
+      new SyncLog(options.db, options.clock, options.profile.id, 'email').runFailed(null, 'Mail sync', error);
     }
     return { status: 'error', error: error instanceof Error ? error.message : 'Sync failed', actions: [] };
   }

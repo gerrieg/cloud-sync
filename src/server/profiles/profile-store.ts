@@ -19,7 +19,36 @@ export function toProfileDto(row: ProfileRow): ProfileDto {
     googleReauthRequired: row.googleReauthRequired,
     lastSyncAt: row.lastSyncAt,
     lastSyncStatus: row.lastSyncStatus,
+    lastSuccessfulSyncAt: row.lastSuccessfulSyncAt,
   };
+}
+
+/** A Profile takes part in background sync only with both accounts connected and usable. */
+export function isActive(profile: ProfileRow): boolean {
+  return (
+    profile.enabled &&
+    profile.appleId !== null &&
+    profile.appleAppPasswordEnc !== null &&
+    profile.googleTokensEnc !== null &&
+    !profile.googleReauthRequired
+  );
+}
+
+/**
+ * Records a finished sync run. `status` is the Profile's overall state after it; `runFailed` says
+ * whether this run itself had errors: only an error-free run moves the last successful sync.
+ */
+export function recordSyncOutcome(
+  db: AppDatabase,
+  profileId: string,
+  at: number,
+  outcome: { readonly status: 'ok' | 'error'; readonly runFailed: boolean },
+): void {
+  updateProfile(db, profileId, {
+    lastSyncAt: at,
+    lastSyncStatus: outcome.status,
+    ...(outcome.runFailed ? {} : { lastSuccessfulSyncAt: at }),
+  });
 }
 
 export function generateTriggerToken(): string {
@@ -58,6 +87,7 @@ export type ProfileRowPatch = Partial<
     | 'triggerTokenEnc'
     | 'lastSyncAt'
     | 'lastSyncStatus'
+    | 'lastSuccessfulSyncAt'
   >
 >;
 

@@ -11,6 +11,8 @@ export interface ProfileDto {
   readonly googleReauthRequired: boolean;
   readonly lastSyncAt: number | null;
   readonly lastSyncStatus: string | null;
+  /** When a sync run last finished without errors; null if none ever did. */
+  readonly lastSuccessfulSyncAt: number | null;
 }
 
 /** State of the persistent IMAP `IDLE` connection that watches a Profile's INBOX. */
@@ -26,6 +28,19 @@ export type GoogleCalendarMode = 'webhook' | 'polling' | 'inactive';
 export interface ProfileStatusDto {
   readonly mailIdle: MailIdleState;
   readonly googleCalendar: GoogleCalendarMode;
+}
+
+/** One Profile card of the overview page: `GET /api/overview`. */
+export interface ProfileOverviewDto {
+  readonly profile: ProfileDto;
+  readonly status: ProfileStatusDto;
+  /** Errors in the sync log that no later run has resolved yet. */
+  readonly openErrors: number;
+}
+
+/** Response of `POST /api/sync-all`: the Profiles a sync was queued for. */
+export interface SyncAllResult {
+  readonly queued: readonly string[];
 }
 
 /** Body of `PATCH /api/profiles/:id`. Apple credentials must be sent together. */

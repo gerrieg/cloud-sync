@@ -129,10 +129,13 @@ describe('Auth UI (fetch boundary)', () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/');
 
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ username: 'admin' }, 200))
-      .mockResolvedValueOnce(jsonResponse([], 200))
-      .mockResolvedValueOnce(jsonResponse({ ok: true }, 200));
+    // The shell loads its pages on its own, so answer by path instead of in call order
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/auth/me') return jsonResponse({ username: 'admin' }, 200);
+      if (path === '/api/auth/logout') return jsonResponse({ ok: true }, 200);
+      return jsonResponse([], 200);
+    });
 
     render(<App />);
 
@@ -143,7 +146,6 @@ describe('Auth UI (fetch boundary)', () => {
       expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
     });
     expect(window.location.pathname).toBe('/login');
-    expect(fetchMock.mock.calls[2][0]).toBe('/api/auth/logout');
-    expect(fetchMock.mock.calls[2][1]?.method).toBe('POST');
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' }));
   });
 });

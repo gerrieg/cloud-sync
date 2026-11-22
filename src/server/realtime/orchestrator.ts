@@ -6,6 +6,7 @@ import type { ProfileStatusDto } from '../../shared/profile.js';
 import { encryptSecret } from '../crypto/secrets.js';
 import {
   findProfile,
+  isActive,
   listProfiles,
   toProvidersContext,
   updateProfile,
@@ -20,6 +21,7 @@ import {
 } from '../providers/types.js';
 import { isBidirectional } from '../sync/calendar-sync.js';
 import { listContactRules } from '../sync/contact-rules-store.js';
+import { pruneSyncLogs } from '../sync/log-retention.js';
 import { listMailRules } from '../sync/mail-rules-store.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
 import { runProfileSync, type SyncDomain } from '../sync/profile-sync.js';
@@ -38,6 +40,7 @@ const IDLE_BACKOFF_MAX_MS = 300_000;
 /** A connection that stayed up this long counts as healthy: the next drop starts the backoff over. */
 const IDLE_STABLE_AFTER_MS = 60_000;
 const TICK_INTERVAL_MS = 1_000;
+const LOG_PRUNE_INTERVAL_MS = 24 * 60 * 60_000;
 /** Apple's calendar tags are cheap to read, so changes show up quickly. */
 const CTAG_POLL_INTERVAL_MS = 30_000;
 /** `syncToken` polling of Google calendars that no healthy webhook channel covers. */
@@ -75,17 +78,6 @@ interface ProfileRuntime {
   readonly running: Set<string>;
 }
 
-/** A Profile takes part in background sync only with both accounts connected and usable. */
-function isActive(profile: ProfileRow): boolean {
-  return (
-    profile.enabled &&
-    profile.appleId !== null &&
-    profile.appleAppPasswordEnc !== null &&
-    profile.googleTokensEnc !== null &&
-    !profile.googleReauthRequired
-  );
-}
-
 export interface RealtimeDeps {
   readonly config: AppConfig;
   readonly db: AppDatabase;
@@ -103,6 +95,7 @@ export class RealtimeOrchestrator {
   private readonly inflight = new Set<Promise<unknown>>();
   private readonly runtimes = new Map<string, ProfileRuntime>();
   private timer: NodeJS.Timeout | null = null;
+  private lastLogPruneAt: number | null = null;
 
   constructor(private readonly deps: RealtimeDeps) {}
 
@@ -130,6 +123,7 @@ export class RealtimeOrchestrator {
    * or close its IDLE connection, poll what is due) and waits for that work to finish.
    */
   async tick(): Promise<void> {
+    this.pruneLogsWhenDue();
     const profiles = listProfiles(this.deps.db);
     const known = new Set(profiles.map((profile) => profile.id));
     for (const [id, runtime] of this.runtimes) {
@@ -139,6 +133,20 @@ export class RealtimeOrchestrator {
       }
     }
     await Promise.all(profiles.map((profile) => this.tickProfile(profile)));
+  }
+
+  /** The sync log is trimmed right at start-up and then once a day. */
+  private pruneLogsWhenDue(): void {
+    const now = this.deps.clock.now();
+    if (this.lastLogPruneAt !== null && now - this.lastLogPruneAt < LOG_PRUNE_INTERVAL_MS) {
+      return;
+    }
+    this.lastLogPruneAt = now;
+    try {
+      pruneSyncLogs(this.deps.db, this.deps.clock);
+    } catch (error) {
+      console.error('Pruning the sync log failed:', error);
+    }
   }
 
   statusOf(profile: ProfileRow): ProfileStatusDto {

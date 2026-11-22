@@ -18,6 +18,8 @@ import { createDeleteApprovalRoutes } from './routes/delete-approvals.js';
 import { createGoogleOAuthRoutes } from './routes/google-oauth.js';
 import { createGoogleWebhookRoutes } from './routes/google-webhook.js';
 import { createHealthRoutes } from './routes/health.js';
+import { createLogRoutes } from './routes/logs.js';
+import { createOverviewRoutes } from './routes/overview.js';
 import { createProfileRoutes } from './routes/profiles.js';
 import { createTriggerSyncRoutes } from './routes/trigger-sync.js';
 
@@ -81,6 +83,8 @@ export function createApp(options: CreateAppOptions): CloudSyncApp {
     createProfileRoutes({ config, db: dbContext.db, clock, locks, createSyncProviders, realtime }),
   );
   app.route('/webhooks/google', createGoogleWebhookRoutes({ config, db: dbContext.db, clock, realtime }));
+  app.route('/api', createOverviewRoutes({ db: dbContext.db, realtime }));
+  app.route('/api/logs', createLogRoutes({ db: dbContext.db }));
   app.route('/api/trigger-sync', createTriggerSyncRoutes({ config, db: dbContext.db, realtime }));
   app.route(
     '/api/delete-approvals',

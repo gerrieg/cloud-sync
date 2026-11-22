@@ -82,7 +82,7 @@ function backend(options: { pending?: DeleteApprovalDto[]; pendingAfterSync?: De
 
 describe('Delete Guard banner (fetch boundary)', () => {
   beforeEach(() => {
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/?view=profile');
   });
 
   afterEach(() => {

@@ -109,7 +109,7 @@ async function openPanel(options?: Parameters<typeof mailBackend>[0]) {
 
 describe('Mail sync UI (fetch boundary)', () => {
   beforeEach(() => {
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/?view=profile');
   });
 
   afterEach(() => {
