@@ -57,6 +57,6 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/cloud-sync:latest
-            ghcr.io/${{ github.repository_owner }}/cloud-sync:0.9.1
+            ghcr.io/${{ github.repository_owner }}/cloud-sync:0.9.2
           cache-from: type=gha
           cache-to: type=gha,mode=max
