@@ -20,10 +20,6 @@ export function contactFingerprint(data: ContactData): string {
   return crypto.createHash('sha1').update(JSON.stringify(content)).digest('hex');
 }
 
-export function photoHash(photo: Buffer): string {
-  return crypto.createHash('sha1').update(photo).digest('hex');
-}
-
 const MIN_PHONE_DIGITS = 6;
 
 function fullName(data: ContactData): string {

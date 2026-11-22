@@ -257,6 +257,44 @@ describe('One-way contact sync HTTP seam', () => {
     });
   });
 
+  describe('Photos linked by iCloud', () => {
+    const URL_A = 'https://gateway.icloud.com/contacts/1/ck/card/AAA';
+    const link = (url: string, crop = 'ABClipRect_1&0&0&10&10&sig1') =>
+      `PHOTO;TYPE=JPEG;X-ABCROP-RECTANGLE=${crop};VALUE=uri:${url}`;
+
+    it('downloads a linked photo and uploads it to Google, then leaves it alone while it is unchanged', async () => {
+      const { sync, world, appleId, token, byName } = await setup();
+      world.putApplePhoto(URL_A, Buffer.from([4, 5, 6]));
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Vorname1', 'Nachname1', [link(URL_A)]));
+
+      await sync();
+      expect(world.photoDownloads).toEqual([URL_A]);
+      expect(world.googlePhoto(token, byName('Vorname1')!.resourceName)).toEqual(Buffer.from([4, 5, 6]));
+
+      // Neither an unchanged run nor an unrelated edit downloads or uploads again
+      await sync();
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Anders', 'Nachname1', [link(URL_A)]));
+      await sync();
+      expect(world.photoDownloads).toEqual([URL_A]);
+      expect(world.photoUploads).toHaveLength(1);
+    });
+
+    it('uploads again when the link line changes, and retries a failed download', async () => {
+      const { sync, world, appleId, token, byName } = await setup();
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Vorname1', 'Nachname1', [link(URL_A)]));
+
+      expect((await sync()).status).toBe('error'); // nothing to download yet
+      world.putApplePhoto(URL_A, Buffer.from([1]));
+      expect((await sync()).status).toBe('ok');
+      expect(world.googlePhoto(token, byName('Vorname1')!.resourceName)).toEqual(Buffer.from([1]));
+
+      world.putApplePhoto(URL_A, Buffer.from([2]));
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Vorname1', 'Nachname1', [link(URL_A, 'ABClipRect_1&0&0&10&10&sig2')]));
+      await sync();
+      expect(world.googlePhoto(token, byName('Vorname1')!.resourceName)).toEqual(Buffer.from([2]));
+    });
+  });
+
   describe('Dry-Run', () => {
     it('previews exactly what the real run does, without writing anything', async () => {
       const { sync, dryRun, world, ctx, google } = await setup();

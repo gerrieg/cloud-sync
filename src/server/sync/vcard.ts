@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { ContactAddress, ContactData } from '../providers/contact-types.js';
 
 /**
@@ -16,6 +17,17 @@ interface Line {
   readonly value: string;
 }
 
+/**
+ * The photo of a card. iCloud serves it as a link (`VALUE=uri`) that needs the account's
+ * credentials; a card can also embed it (`ENCODING=b`). Exactly one of `bytes` and `url` is set.
+ */
+export interface CardPhoto {
+  /** Changes when the photo does: a hash of the bytes, or of the whole `PHOTO` line for a link. */
+  readonly key: string;
+  readonly bytes: Buffer | null;
+  readonly url: string | null;
+}
+
 export interface ParsedVCard {
   readonly uid: string;
   readonly isGroup: boolean;
@@ -23,8 +35,7 @@ export interface ParsedVCard {
   readonly name: string;
   readonly memberUids: readonly string[];
   readonly data: ContactData;
-  /** Decoded `PHOTO`, if the card embeds one. */
-  readonly photo: Buffer | null;
+  readonly photo: CardPhoto | null;
 }
 
 const LINE = /^(?:([A-Za-z0-9-]+)\.)?([A-Za-z0-9-]+)((?:;(?:[^:";]|"[^"]*")*)*):(.*)$/s;
@@ -117,13 +128,22 @@ function dataOf(lines: readonly Line[]): ContactData {
   };
 }
 
-function photoOf(lines: readonly Line[]): Buffer | null {
+const sha1 = (value: string | Buffer) => crypto.createHash('sha1').update(value).digest('hex');
+
+function photoOf(lines: readonly Line[]): CardPhoto | null {
   const photo = first(lines, 'PHOTO');
-  if (!photo || !/ENCODING=(b|base64)/i.test(photo.params)) {
+  if (!photo) {
+    return null;
+  }
+  if (/VALUE=uri/i.test(photo.params)) {
+    const url = photo.value.trim();
+    return /^https:\/\//i.test(url) ? { key: sha1(`${photo.params}:${photo.value}`), bytes: null, url } : null;
+  }
+  if (!/ENCODING=(b|base64)/i.test(photo.params)) {
     return null;
   }
   const bytes = Buffer.from(photo.value.replace(/\s/g, ''), 'base64');
-  return bytes.length > 0 ? bytes : null;
+  return bytes.length > 0 ? { key: sha1(bytes), bytes, url: null } : null;
 }
 
 /** Throws when the text is not a vCard with a UID. */

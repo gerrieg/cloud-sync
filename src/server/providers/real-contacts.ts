@@ -16,6 +16,7 @@ import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
 
 const ICLOUD_CARDDAV_URL = 'https://contacts.icloud.com';
 const PERSON_FIELDS = 'names,emailAddresses,phoneNumbers,organizations,birthdays,addresses,biographies,memberships';
+const PHOTO_TIMEOUT_MS = 30_000;
 const MY_CONTACTS = 'contactGroups/myContacts';
 
 type AppleContacts = SyncProviders['apple']['contacts'];
@@ -93,6 +94,24 @@ export function createRealAppleContacts(credentials: AppleCredentials | null): A
     async deleteObject(href, etag) {
       const { client } = await connect();
       assertCalDavWrite(await client.deleteVCard({ vCard: { url: href, etag } }), href);
+    },
+    async fetchPhoto(url) {
+      if (!credentials) {
+        throw new Error('No Apple credentials configured');
+      }
+      // The credentials must never go to a host other than iCloud
+      const { protocol, hostname } = new URL(url);
+      if (protocol !== 'https:' || !(hostname === 'icloud.com' || hostname.endsWith('.icloud.com'))) {
+        throw new Error(`Refusing to download a contact photo from ${hostname}`);
+      }
+      const response = await fetch(url, {
+        headers: { Authorization: `Basic ${Buffer.from(`${credentials.appleId}:${credentials.appPassword}`).toString('base64')}` },
+        signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new Error(`iCloud contact photo download failed with HTTP ${response.status}`);
+      }
+      return Buffer.from(await response.arrayBuffer());
     },
   };
 }

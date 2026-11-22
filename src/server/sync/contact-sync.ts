@@ -17,7 +17,7 @@ import {
 } from '../providers/contact-types.js';
 import type { SyncProviders } from '../providers/types.js';
 import { readAddressBook, type AddressBookEntry } from './address-book.js';
-import { contactFingerprint, findMatchingContact, photoHash } from './contact-data.js';
+import { contactFingerprint, findMatchingContact } from './contact-data.js';
 import { listContactRules, updateContactRule, type ContactRuleRow } from './contact-rules-store.js';
 import {
   deleteSyncedContact,
@@ -33,7 +33,7 @@ import { contactRuleLabel } from './rule-labels.js';
 import { SyncLog } from './sync-log-store.js';
 import type { GuardedDeletion } from './delete-guard.js';
 import { carryOutPlan, heldAsSkipped, ignoringNotFound, runProfileWide, type PlanEntryOf } from './run-plan.js';
-import { addGroupMember, buildVCard, displayName, mergeIntoVCard, parseVCard } from './vcard.js';
+import { addGroupMember, buildVCard, displayName, mergeIntoVCard, parseVCard, type CardPhoto } from './vcard.js';
 
 export interface ContactSyncOptions {
   readonly db: AppDatabase;
@@ -298,12 +298,14 @@ function plan(
   }
 
   /** Uploads the Apple photo unless its hash is the one already in Google; returns the hash now in Google. */
-  async function syncPhoto(resourceName: string, photo: Buffer | null, knownHash: string): Promise<string> {
-    if (!photo || photoHash(photo) === knownHash) {
+  async function syncPhoto(resourceName: string, photo: CardPhoto | null, knownHash: string): Promise<string> {
+    if (!photo || photo.key === knownHash) {
       return knownHash;
     }
-    await providers.google.contacts.updatePhoto(resourceName, photo);
-    return photoHash(photo);
+    // Only a changed photo is downloaded from iCloud
+    const bytes = photo.bytes ?? (await providers.apple.contacts.fetchPhoto(photo.url ?? ''));
+    await providers.google.contacts.updatePhoto(resourceName, bytes);
+    return photo.key;
   }
 
   function create(entry: AddressBookEntry, labels: string[]): PlanEntry {
@@ -368,7 +370,7 @@ function plan(
     }
     const labelsEqual = stored.join('\n') === labels.join('\n');
     // A photo that never made it to Google (e.g. the upload failed) is retried without an Apple change
-    const photoPending = entry.card.photo !== null && photoHash(entry.card.photo) !== row.photoHash;
+    const photoPending = entry.card.photo !== null && entry.card.photo.key !== row.photoHash;
     if (labelsEqual && !photoPending) {
       return { report: report('skip', row.appleContactUid, row.summary, 'unchanged') };
     }
@@ -389,7 +391,7 @@ function plan(
             throw error;
           }
           // Deleted by hand in Google: One-Way Sync leaves it, so there is no photo to retry either
-          hash = entry.card.photo ? photoHash(entry.card.photo) : hash;
+          hash = entry.card.photo?.key ?? hash;
         }
         updateSyncedContact(db, row.id, { labels: JSON.stringify(labels), photoHash: hash });
       },

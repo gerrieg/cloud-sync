@@ -87,6 +87,8 @@ export interface SyncProviders {
       /** Same contract as the calendar `putObject`: typed errors for 412 and 404. */
       putObject(input: AppleContactWrite): Promise<AppleObjectRef>;
       deleteObject(href: string, etag: string): Promise<void>;
+      /** Downloads a contact photo that a vCard links to (`PHOTO;VALUE=uri`); iCloud needs the credentials for it. */
+      fetchPhoto(url: string): Promise<Buffer>;
     };
     /** iCloud IMAP. Throws AppleMailFolderNotFoundError for a folder that does not exist (anymore). */
     readonly mail: {

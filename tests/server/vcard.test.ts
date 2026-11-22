@@ -26,7 +26,30 @@ describe('Apple vCard 3.0 parsing', () => {
       note: 'Kunde seit 2020\nZahlt pünktlich',
     });
     // The folded base64 PHOTO decodes to the original PNG
-    expect(card.photo?.subarray(0, 4).toString('hex')).toBe('89504e47');
+    expect(card.photo?.bytes?.subarray(0, 4).toString('hex')).toBe('89504e47');
+  });
+
+  it('reads a photo that iCloud links to instead of embedding it', () => {
+    const vcard = [
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      'UID:u1',
+      'FN:Armin',
+      'PHOTO;TYPE=JPEG;X-ABCROP-RECTANGLE=ABClipRect_1&145&411&449&449&n91LwU0DFBh',
+      ' olMrCIYcmuw==;VALUE=uri:https://gateway.icloud.com/contacts/1/ck/card/ABC',
+      'END:VCARD',
+    ].join('\r\n');
+
+    const photo = parseVCard(vcard).photo;
+
+    expect(photo).toMatchObject({ bytes: null, url: 'https://gateway.icloud.com/contacts/1/ck/card/ABC' });
+    // A different crop signature means a different photo
+    expect(parseVCard(vcard.replace('n91LwU0DFBh', 'xxxxxxxxxxx')).photo?.key).not.toBe(photo?.key);
+  });
+
+  it('ignores a linked photo that is not https', () => {
+    const vcard = 'BEGIN:VCARD\r\nVERSION:3.0\r\nUID:u1\r\nFN:A\r\nPHOTO;VALUE=uri:http://example.com/a.jpg\r\nEND:VCARD';
+    expect(parseVCard(vcard).photo).toBeNull();
   });
 
   it('reads a contact group with its member UIDs', () => {

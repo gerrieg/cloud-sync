@@ -55,16 +55,24 @@ export class FakeContactWorld {
   readonly appleWrites: { kind: 'put' | 'delete'; href: string }[] = [];
   /** Photo uploads in order, with the bytes that were sent. */
   readonly photoUploads: { resourceName: string; photo: Buffer }[] = [];
+  /** URLs downloaded through `fetchPhoto`, in order. */
+  readonly photoDownloads: string[] = [];
   readonly trace: string[] = [];
 
   private readonly apple = new Map<string, AppleBook>();
   private readonly google = new Map<string, GoogleBook>();
   private beforeNextApplePut: (() => void) | null = null;
   private photoFailure: Error | null = null;
+  private readonly applePhotos = new Map<string, Buffer>();
   private readonly writeRejections: { givenName: string; error: Error }[] = [];
   private counter = 0;
 
   // ---- Apple -------------------------------------------------------------------------------
+
+  /** A photo iCloud serves at `url`, which a vCard links to with `PHOTO;VALUE=uri`. */
+  putApplePhoto(url: string, bytes: Buffer): void {
+    this.applePhotos.set(url, bytes);
+  }
 
   putAppleVCard(appleId: string, href: string, vcard: string): void {
     const book = this.appleBook(appleId);
@@ -199,6 +207,14 @@ export class FakeContactWorld {
         book.objects.set(href, { etag, vcard: input.vcard });
         book.ctag = this.next('ctag');
         return { href, etag };
+      },
+      fetchPhoto: async (url) => {
+        this.photoDownloads.push(url);
+        const bytes = this.applePhotos.get(url);
+        if (!bytes) {
+          throw new Error(`No photo at ${url}`);
+        }
+        return bytes;
       },
       deleteObject: async (href, etag) => {
         const book = this.appleBook(appleId ?? '');
