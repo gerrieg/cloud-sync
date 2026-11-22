@@ -1,0 +1,1 @@
+ALTER TABLE `google_watch_channels` ADD `confirmed_at` integer;

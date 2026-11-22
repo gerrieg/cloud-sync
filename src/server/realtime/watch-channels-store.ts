@@ -16,6 +16,13 @@ export function insertWatchChannel(db: AppDatabase, row: WatchChannelRow): void 
   db.insert(googleWatchChannels).values(row).run();
 }
 
+/** Records that Google reached the webhook through this channel (keeps the first time). */
+export function confirmWatchChannel(db: AppDatabase, channel: WatchChannelRow, at: number): void {
+  if (channel.confirmedAt === null) {
+    db.update(googleWatchChannels).set({ confirmedAt: at }).where(eq(googleWatchChannels.id, channel.id)).run();
+  }
+}
+
 export function deleteWatchChannel(db: AppDatabase, channelId: string): void {
   db.delete(googleWatchChannels).where(eq(googleWatchChannels.id, channelId)).run();
 }

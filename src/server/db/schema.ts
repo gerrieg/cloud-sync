@@ -207,6 +207,8 @@ export const googleWatchChannels = sqliteTable('google_watch_channels', {
   tokenEnc: text('token_enc').notNull(),
   /** Epoch milliseconds at which Google lets the channel lapse. */
   expiresAt: integer('expires_at').notNull(),
+  /** When Google first reached the webhook through this channel; null while that is unproven. */
+  confirmedAt: integer('confirmed_at'),
 });
 
 export const pendingDeleteApprovals = sqliteTable('pending_delete_approvals', {

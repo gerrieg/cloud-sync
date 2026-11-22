@@ -6,7 +6,7 @@ import type { AppConfig } from '../config.js';
 import { decryptSecret } from '../crypto/secrets.js';
 import type { AppDatabase } from '../db/index.js';
 import type { RealtimeOrchestrator } from '../realtime/orchestrator.js';
-import { findWatchChannel } from '../realtime/watch-channels-store.js';
+import { confirmWatchChannel, findWatchChannel } from '../realtime/watch-channels-store.js';
 
 export interface GoogleWebhookRouteDeps {
   readonly config: AppConfig;
@@ -39,6 +39,8 @@ export function createGoogleWebhookRoutes(deps: GoogleWebhookRouteDeps): Hono<{ 
     ) {
       return c.json({ error: 'Forbidden' }, 403);
     }
+    // Any valid call proves that Google can reach us, so the channel counts as healthy from now on
+    confirmWatchChannel(db, channel, clock.now());
     // Google first sends a `sync` message to confirm the channel; only real changes need a sync
     if (c.req.header('x-goog-resource-state') !== 'sync') {
       void realtime.requestSync(profileId, 'calendars');

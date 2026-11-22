@@ -362,12 +362,12 @@ export class RealtimeOrchestrator {
     return [...new Set(rules.map((rule) => rule.googleCalendarId))];
   }
 
-  /** Google calendars with a notification channel that is still alive. */
+  /** Google calendars with a channel that is alive and that Google has proven to reach the webhook with. */
   private healthyChannelCalendars(profile: ProfileRow): Set<string> {
     const now = this.deps.clock.now();
     return new Set(
       listWatchChannels(this.deps.db, profile.id)
-        .filter((channel) => channel.expiresAt > now)
+        .filter((channel) => channel.confirmedAt !== null && channel.expiresAt > now)
         .map((channel) => channel.googleCalendarId),
     );
   }
@@ -418,6 +418,7 @@ export class RealtimeOrchestrator {
           resourceId,
           tokenEnc: encryptSecret(token, config.encryptionKey),
           expiresAt,
+          confirmedAt: null,
         });
       } catch (error) {
         if (error instanceof GoogleAuthError) {

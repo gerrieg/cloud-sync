@@ -40,6 +40,12 @@ describe('real-time calendar sync', () => {
       ctx.app.request(`/webhooks/google/${profileId}`, { method: 'POST', headers });
     const notify = (channel: { id: string; token: string }, state = 'exists') =>
       webhook({ 'x-goog-channel-id': channel.id, 'x-goog-channel-token': channel.token, 'x-goog-resource-state': state });
+    /** What Google does right after `events.watch`: it calls the webhook once with state `sync`. */
+    const confirmChannels = async () => {
+      for (const channel of world.activeWatchChannels('primary')) {
+        await notify(channel, 'sync');
+      }
+    };
     const status = () => api.json<ProfileStatusDto>(`/api/profiles/${profile.id}/status`);
     const googleChangeReads = () => world.trace.filter((entry) => entry.startsWith('google.changes:')).length;
     const channels = () => world.activeWatchChannels('primary');
@@ -53,7 +59,7 @@ describe('real-time calendar sync', () => {
       world.editGoogleEvent(GOOGLE_REFRESH_TOKEN, 'primary', id, { summary: 'Verschoben in Google' });
     const appleSummary = () => world.appleCalendarObject(APPLE_ID, HOME, 'e1.ics')!.ics.match(/SUMMARY:(.*)/)![1]!.trim();
 
-    return { ctx, api, world, profile, rule, rulePath, tick, webhook, notify, status, googleChangeReads, channels, seedSyncedEvent, editInGoogle, appleSummary };
+    return { ctx, api, world, profile, rule, rulePath, tick, webhook, notify, confirmChannels, status, googleChangeReads, channels, seedSyncedEvent, editInGoogle, appleSummary };
   }
 
   describe('Google Calendar webhooks', () => {
@@ -63,6 +69,35 @@ describe('real-time calendar sync', () => {
 
       expect(s.channels()).toHaveLength(1);
       expect(s.channels()[0]).toMatchObject({ address: `${BASE_URL}/webhooks/google/${s.profile.id}` });
+    });
+
+    it('treats a channel as degraded until Google has reached the webhook, and as healthy afterwards', async () => {
+      const s = await scenario();
+      await s.tick();
+      expect(await s.status()).toMatchObject({ googleCalendar: 'polling' });
+
+      await s.confirmChannels();
+      expect(await s.status()).toMatchObject({ googleCalendar: 'webhook' });
+    });
+
+    it('keeps polling every 60s while the webhook was never reached, e.g. because the public URL is unreachable', async () => {
+      const s = await scenario();
+      const event = await s.seedSyncedEvent();
+      await s.tick();
+
+      s.editInGoogle(event.id);
+      await s.tick(60_000);
+
+      expect(s.appleSummary()).toBe('Verschoben in Google');
+    });
+
+    it('counts a real change notification as proof that the webhook works', async () => {
+      const s = await scenario();
+      await s.tick();
+
+      await s.notify(s.channels()[0]!, 'exists');
+      await s.ctx.realtime.settled();
+
       expect(await s.status()).toMatchObject({ googleCalendar: 'webhook' });
     });
 
@@ -216,6 +251,7 @@ describe('real-time calendar sync', () => {
     it('does not poll Google every minute while a webhook channel is healthy', async () => {
       const s = await scenario();
       await s.tick();
+      await s.confirmChannels();
       const reads = s.googleChangeReads();
 
       await s.tick(60_000);
@@ -237,6 +273,7 @@ describe('real-time calendar sync', () => {
 
       s.world.clearWatchFailure(GOOGLE_REFRESH_TOKEN);
       await s.tick(5 * 60_000);
+      await s.confirmChannels();
       expect(await s.status()).toMatchObject({ googleCalendar: 'webhook' });
     });
 
@@ -244,6 +281,8 @@ describe('real-time calendar sync', () => {
       const s = await scenario();
       const event = await s.seedSyncedEvent();
       await s.tick();
+      await s.confirmChannels();
+      expect(await s.status()).toMatchObject({ googleCalendar: 'webhook' });
       s.world.failWatches(GOOGLE_REFRESH_TOKEN, new Error('Webhook URL not reachable'));
 
       await s.tick(FAKE_WATCH_LIFETIME_MS + 1_000);
