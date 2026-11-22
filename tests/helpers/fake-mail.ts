@@ -9,7 +9,7 @@ import { GoogleAuthError, type SyncProviders } from '../../src/server/providers/
 import type { MailFolderUse } from '../../src/shared/mail.js';
 
 export interface GoogleMailLog {
-  readonly kind: 'import' | 'modify' | 'trash' | 'untrash' | 'delete' | 'createLabel';
+  readonly kind: 'import' | 'modify' | 'trash' | 'untrash' | 'createLabel';
   readonly id: string;
 }
 
@@ -387,11 +387,6 @@ export class FakeMailWorld {
       untrash: async (id) => {
         message(id).labelIds.delete('TRASH');
         this.googleWrites.push({ kind: 'untrash', id });
-      },
-      delete: async (id) => {
-        message(id);
-        account().messages.delete(id);
-        this.googleWrites.push({ kind: 'delete', id });
       },
     };
   }

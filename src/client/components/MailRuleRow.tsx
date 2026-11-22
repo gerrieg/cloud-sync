@@ -1,6 +1,5 @@
 import type { MailRuleDto, MailRuleUpdate } from '../lib/mail-api.js';
 import { checkboxLabelClass, controlRowClass, secondaryButtonClass } from '../lib/styles.js';
-import { DeleteBehaviorSelect } from './DeleteBehaviorSelect.js';
 import { WindowSelect } from './WindowSelect.js';
 
 interface MailRuleRowProps {
@@ -20,11 +19,6 @@ export function MailRuleRow({ rule, busy, onUpdate, onDelete }: MailRuleRowProps
           value={rule.syncWindowDays}
           disabled={busy}
           onChange={(syncWindowDays) => onUpdate(rule.id, { syncWindowDays })}
-        />
-        <DeleteBehaviorSelect
-          value={rule.deleteBehavior}
-          disabled={busy}
-          onChange={(deleteBehavior) => onUpdate(rule.id, { deleteBehavior })}
         />
         <label className={checkboxLabelClass}>
           <input

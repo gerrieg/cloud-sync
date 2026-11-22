@@ -1,0 +1,1 @@
+ALTER TABLE `mail_sync_rules` DROP COLUMN `delete_behavior`;

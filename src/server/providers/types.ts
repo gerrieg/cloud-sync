@@ -167,8 +167,6 @@ export interface SyncProviders {
       trash(id: string): Promise<void>;
       /** Takes the message out of Gmail's Trash again. Throws GoogleMessageNotFoundError if it is gone. */
       untrash(id: string): Promise<void>;
-      /** Permanently deletes the message. Throws GoogleMessageNotFoundError if it is gone. */
-      delete(id: string): Promise<void>;
     };
   };
 }

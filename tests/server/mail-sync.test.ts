@@ -234,7 +234,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
       expect(result.actions).toEqual([expect.objectContaining({ action: 'update', reason: 'moved' })]);
       expect(gmail()).toEqual([{ ...before, labels: ['Receipts'] }]);
       expect(world.googleWrites.filter((w) => w.kind === 'import')).toHaveLength(imports);
-      expect(world.googleWrites.filter((w) => w.kind === 'trash' || w.kind === 'delete')).toEqual([]);
+      expect(world.googleWrites.filter((w) => w.kind === 'trash')).toEqual([]);
     });
 
     it('does not mistake an old tracked message moved between synced folders for a deletion', async () => {
@@ -340,7 +340,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
       expect(world.googleWrites).toHaveLength(writes);
     });
 
-    it('with the trash behavior, emptying the iCloud trash leaves the Gmail trash alone', async () => {
+    it('emptying the iCloud trash leaves the Gmail trash alone', async () => {
       const { deliver, sync, byRaw, world, appleId } = await setupWithFiller();
       const uid = deliver('INBOX', 'Unwanted', { seen: true });
       await sync();
@@ -355,22 +355,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
       expect(byRaw('Unwanted').labels).toContain('TRASH');
     });
 
-    it('with the delete behavior, emptying the iCloud trash permanently deletes the Gmail message', async () => {
-      const { deliver, sync, gmail, world, appleId } = await setupWithFiller({ deleteBehavior: 'delete' });
-      const uid = deliver('INBOX', 'Unwanted', { seen: true });
-      await sync();
-      const trashed = world.move(appleId, 'INBOX', uid, 'Deleted Messages');
-      await sync();
-      expect(gmail()).toHaveLength(7);
-
-      world.expunge(appleId, 'Deleted Messages', trashed);
-      const result = await sync();
-
-      expect(changes(result)).toEqual([expect.objectContaining({ action: 'delete', reason: 'expunged' })]);
-      expect(gmail()).toHaveLength(6);
-    });
-
-    it('applies the trash behavior to a message that is expunged directly', async () => {
+    it('moves a message that is expunged directly to the Gmail trash, never deleting it permanently', async () => {
       const { deliver, sync, byRaw, gmail, world, appleId } = await setupWithFiller();
       const uid = deliver('INBOX', 'Expunged', { seen: true });
       await sync();
@@ -380,18 +365,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
 
       expect(gmail()).toHaveLength(7);
       expect(byRaw('Expunged').labels).toContain('TRASH');
-    });
-
-    it('applies the delete behavior to a message that is expunged directly', async () => {
-      const { deliver, sync, gmail, world, appleId } = await setupWithFiller({ deleteBehavior: 'delete' });
-      const uid = deliver('INBOX', 'Expunged', { seen: true });
-      await sync();
-
-      world.expunge(appleId, 'INBOX', uid);
-      await sync();
-
-      expect(gmail()).toHaveLength(6);
-      expect(world.googleWrites.at(-1)?.kind).toBe('delete');
+      expect(world.googleWrites.at(-1)?.kind).toBe('trash');
     });
 
     it('brings a message back to Gmail when it is moved out of Deleted Messages again', async () => {
@@ -426,7 +400,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
 
   describe('Delete Guard', () => {
     async function spike() {
-      const scenario = await setupWithFiller({ deleteBehavior: 'delete' });
+      const scenario = await setupWithFiller();
       const { world, appleId, deliver } = scenario;
       for (let i = 1; i <= 3; i += 1) {
         deliver('Receipts', `Receipt ${i}`, { seen: true });
@@ -461,7 +435,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ status: 'approved', domain: 'mail', label: 'Mail' });
-      expect(gmail()).toHaveLength(5);
+      expect(gmail().filter((m) => m.labels.includes('TRASH'))).toHaveLength(4);
       expect(await pending()).toEqual([]);
     });
 
@@ -475,7 +449,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
       const res = await api.request(`/api/delete-approvals/${first.deleteApprovalId}/dismiss`, { method: 'POST' });
 
       expect(res.status).toBe(200);
-      expect(gmail()).toHaveLength(9);
+      expect(gmail().filter((m) => m.labels.includes('TRASH'))).toEqual([]);
       expect((await pending()) as DeleteApprovalDto[]).toEqual([]);
     });
 

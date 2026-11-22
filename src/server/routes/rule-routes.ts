@@ -24,7 +24,6 @@ interface RuleOptionValues {
   /** Days of history; null means all of it. */
   readonly syncWindowDays: number | null;
   readonly syncReminders: boolean;
-  readonly deleteBehavior: 'trash' | 'delete';
   readonly enabled: boolean;
 }
 
@@ -37,8 +36,6 @@ const optionChecks: { readonly [K in keyof RuleOptionValues]: (value: unknown) =
       ? value
       : { error: 'syncWindowDays must be a positive integer or null (all history)' },
   syncReminders: (value) => (typeof value === 'boolean' ? value : { error: 'syncReminders must be a boolean' }),
-  deleteBehavior: (value) =>
-    value === 'trash' || value === 'delete' ? value : { error: 'deleteBehavior must be "trash" or "delete"' },
   enabled: (value) => (typeof value === 'boolean' ? value : { error: 'enabled must be a boolean' }),
 };
 

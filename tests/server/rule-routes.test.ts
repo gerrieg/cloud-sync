@@ -7,7 +7,7 @@ import { simpleIcs } from '../helpers/fixtures.js';
 import { createTestContext } from '../helpers/test-app.js';
 
 describe('parseRuleOptions', () => {
-  const all = ['direction', 'syncWindowDays', 'syncReminders', 'deleteBehavior', 'enabled'] as const;
+  const all = ['direction', 'syncWindowDays', 'syncReminders', 'enabled'] as const;
 
   it('takes the valid options of the body and leaves the others unset', () => {
     expect(parseRuleOptions({ direction: 'bidirectional', enabled: false }, all)).toEqual({
@@ -18,7 +18,7 @@ describe('parseRuleOptions', () => {
   });
 
   it('ignores options the kind of rule does not accept', () => {
-    expect(parseRuleOptions({ direction: 'sideways', deleteBehavior: 'delete' }, ['enabled'])).toEqual({
+    expect(parseRuleOptions({ direction: 'sideways', syncReminders: true }, ['enabled'])).toEqual({
       ok: true,
       value: {},
     });
@@ -30,7 +30,6 @@ describe('parseRuleOptions', () => {
     [{ syncWindowDays: 1.5 }, 'syncWindowDays must be a positive integer or null (all history)'],
     [{ syncWindowDays: '7' }, 'syncWindowDays must be a positive integer or null (all history)'],
     [{ syncReminders: 'yes' }, 'syncReminders must be a boolean'],
-    [{ deleteBehavior: 'archive' }, 'deleteBehavior must be "trash" or "delete"'],
     [{ enabled: 1 }, 'enabled must be a boolean'],
   ])('rejects %j', (body, error) => {
     expect(parseRuleOptions(body, all)).toEqual({ ok: false, error });

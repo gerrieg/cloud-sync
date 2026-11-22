@@ -1,7 +1,5 @@
 /** Mail-sync contracts shared by the server API and the React client. */
 
-export type MailDeleteBehavior = 'trash' | 'delete';
-
 /** The special use of an IMAP folder, as far as the sync cares about it. */
 export type MailFolderUse = 'inbox' | 'sent' | 'drafts' | 'junk' | 'trash' | null;
 
@@ -25,8 +23,6 @@ export interface MailRuleDto {
   readonly googleLabel: string;
   /** Days of history to import; null means everything. */
   readonly syncWindowDays: number | null;
-  /** What happens in Gmail when a message is permanently removed from iCloud. */
-  readonly deleteBehavior: MailDeleteBehavior;
   readonly enabled: boolean;
 }
 
@@ -34,7 +30,6 @@ export interface MailRuleDto {
 export interface MailRuleCreate {
   readonly appleFolderPath: string;
   readonly syncWindowDays?: number | null;
-  readonly deleteBehavior?: MailDeleteBehavior;
   readonly enabled?: boolean;
 }
 
@@ -43,7 +38,7 @@ export type MailRuleUpdate = Partial<Omit<MailRuleCreate, 'appleFolderPath'>>;
 
 /** Everything a Sync Rule changes about one message, as shown in a run report. */
 export interface PlannedMailAction {
-  /** `create` imports a message, `update` changes labels or flags, `delete` trashes or deletes it in Gmail. */
+  /** `create` imports a message, `update` changes labels or flags, `delete` moves it to the Gmail Trash. */
   readonly action: 'create' | 'update' | 'delete' | 'skip';
   /** The profile-wide message key (normalized Message-ID or the fallback hash). */
   readonly uid: string;

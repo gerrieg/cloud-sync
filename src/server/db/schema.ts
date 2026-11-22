@@ -151,9 +151,6 @@ export const mailSyncRules = sqliteTable(
     googleLabel: text('google_label').notNull(),
     /** Days of history to import; null means everything. */
     syncWindowDays: integer('sync_window_days').default(30),
-    deleteBehavior: text('delete_behavior', { enum: ['trash', 'delete'] })
-      .notNull()
-      .default('trash'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   },
   (table) => [uniqueIndex('mail_sync_rules_folder_idx').on(table.profileId, table.appleFolderPath)],

@@ -26,7 +26,6 @@ const EXISTING: MailRuleDto = {
   appleFolderName: 'INBOX',
   googleLabel: 'INBOX',
   syncWindowDays: 30,
-  deleteBehavior: 'trash',
   enabled: true,
 };
 
@@ -69,7 +68,6 @@ function mailBackend(options: { rules?: MailRuleDto[]; pendingAfterSync?: Delete
           appleFolderName: folder.name,
           googleLabel: folder.googleLabel,
           syncWindowDays: body.syncWindowDays === undefined ? 30 : body.syncWindowDays,
-          deleteBehavior: body.deleteBehavior ?? 'trash',
           enabled: true,
         };
         rules.push(created);
@@ -133,41 +131,37 @@ describe('Mail sync UI (fetch boundary)', () => {
     expect(calls.find((c) => c.method === 'POST' && c.path === `${BASE}/rules/mail`)?.body).toEqual({
       appleFolderPath: 'Sent Messages',
       syncWindowDays: 30,
-      deleteBehavior: 'trash',
     });
   });
 
-  it('adds a rule that syncs all history and deletes permanently', async () => {
+  it('adds a rule that syncs all history', async () => {
     const user = userEvent.setup();
     const { calls } = await openPanel();
     const form = (await screen.findByRole('button', { name: /add mail rule/i })).closest('form')!;
 
     await user.selectOptions(within(form).getByLabelText(/^start date$/i), 'all');
-    await user.selectOptions(within(form).getByLabelText(/when deleted in icloud/i), 'delete');
+    expect(within(form).queryByLabelText(/when deleted in icloud/i)).not.toBeInTheDocument();
     await user.click(within(form).getByRole('button', { name: /add mail rule/i }));
 
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'POST' && c.path === `${BASE}/rules/mail`)?.body).toEqual({
         appleFolderPath: 'INBOX',
         syncWindowDays: null,
-        deleteBehavior: 'delete',
       }),
     );
   });
 
-  it('changes start date, delete behavior and the active state of a rule', async () => {
+  it('changes start date and the active state of a rule', async () => {
     const user = userEvent.setup();
     const { calls } = await openPanel({ rules: [EXISTING] });
     const row = (await screen.findByText(/INBOX → INBOX/)).closest('li')!;
 
     await user.selectOptions(within(row).getByLabelText(/^start date$/i), 'all');
-    await user.selectOptions(within(row).getByLabelText(/when deleted in icloud/i), 'delete');
     await user.click(within(row).getByLabelText(/^active$/i));
 
     await waitFor(() =>
       expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([
         { syncWindowDays: null },
-        { deleteBehavior: 'delete' },
         { enabled: false },
       ]),
     );

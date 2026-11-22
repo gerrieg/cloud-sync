@@ -418,14 +418,14 @@ describe('the Gmail adapter', () => {
       modify: vi.fn().mockRejectedValue(failure(404)),
       trash: vi.fn().mockRejectedValue(failure(404)),
       untrash: vi.fn().mockRejectedValue(failure(404)),
-      delete: vi.fn().mockRejectedValue(failure(410)),
     };
     const mail = adapter({ messages });
 
     await expect(mail.modify('m1', { addLabelIds: [], removeLabelIds: ['L'] })).rejects.toBeInstanceOf(GoogleMessageNotFoundError);
     await expect(mail.trash('m1')).rejects.toBeInstanceOf(GoogleMessageNotFoundError);
     await expect(mail.untrash('m1')).rejects.toBeInstanceOf(GoogleMessageNotFoundError);
-    await expect(mail.delete('m1')).rejects.toMatchObject({ response: { status: 410 } });
+    const gone = adapter({ messages: { modify: vi.fn().mockRejectedValue(failure(410)) } });
+    await expect(gone.modify('m1', { addLabelIds: [], removeLabelIds: [] })).rejects.toMatchObject({ response: { status: 410 } });
   });
 
   it('asks for a re-authentication when the authorization is dead', async () => {

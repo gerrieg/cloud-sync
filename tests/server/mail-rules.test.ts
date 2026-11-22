@@ -42,7 +42,7 @@ describe('Mail folder discovery and Mail Folder Sync Rules HTTP seam', () => {
     expect((await api.request(`/api/profiles/${unconnected.id}/discover/mail-folders`)).status).toBe(409);
   });
 
-  it('creates a rule that is active, trashes deletions and syncs the last 30 days by default', async () => {
+  it('creates a rule that is active and syncs the last 30 days by default', async () => {
     const { api, rulesPath } = await setup();
 
     const res = await api.request(rulesPath, { method: 'POST', body: { appleFolderPath: 'Sent Messages' } });
@@ -52,24 +52,23 @@ describe('Mail folder discovery and Mail Folder Sync Rules HTTP seam', () => {
       appleFolderPath: 'Sent Messages',
       googleLabel: 'SENT',
       syncWindowDays: 30,
-      deleteBehavior: 'trash',
       enabled: true,
     });
     expect((await api.json<MailRuleDto[]>(rulesPath)).map((r) => r.appleFolderPath)).toEqual(['Sent Messages']);
   });
 
-  it('accepts a custom window, all history and the delete behavior, and updates them later', async () => {
+  it('accepts a custom window and all history, and updates them later', async () => {
     const { api, rulesPath, createRule } = await setup();
-    const rule = await createRule('Receipts', { syncWindowDays: null, deleteBehavior: 'delete', enabled: false });
-    expect(rule).toMatchObject({ syncWindowDays: null, deleteBehavior: 'delete', enabled: false });
+    const rule = await createRule('Receipts', { syncWindowDays: null, enabled: false });
+    expect(rule).toMatchObject({ syncWindowDays: null, enabled: false });
 
     const patched = await api.request(`${rulesPath}/${rule.id}`, {
       method: 'PATCH',
-      body: { syncWindowDays: 90, deleteBehavior: 'trash', enabled: true },
+      body: { syncWindowDays: 90, enabled: true },
     });
 
     expect(patched.status).toBe(200);
-    expect((await patched.json()) as MailRuleDto).toMatchObject({ syncWindowDays: 90, deleteBehavior: 'trash', enabled: true });
+    expect((await patched.json()) as MailRuleDto).toMatchObject({ syncWindowDays: 90, enabled: true });
   });
 
   it('rejects invalid input, unknown folders, excluded folders and duplicates', async () => {
@@ -78,7 +77,6 @@ describe('Mail folder discovery and Mail Folder Sync Rules HTTP seam', () => {
 
     expect((await post({})).status).toBe(400);
     expect((await post({ appleFolderPath: 'INBOX', syncWindowDays: 0 })).status).toBe(400);
-    expect((await post({ appleFolderPath: 'INBOX', deleteBehavior: 'shred' })).status).toBe(400);
     expect((await post({ appleFolderPath: 'INBOX', enabled: 'yes' })).status).toBe(400);
     expect((await post({ appleFolderPath: 'Nope' })).status).toBe(400);
     expect((await post({ appleFolderPath: 'Drafts' })).status).toBe(400);
@@ -123,15 +121,16 @@ describe('Mail folder discovery and Mail Folder Sync Rules HTTP seam', () => {
       expect(remaining.find((m) => m.raw.includes('Only inbox'))?.labels).toContain('TRASH');
     });
 
-    it('with cleanupGoogle=true permanently deletes when the rule says delete', async () => {
+    it('no longer has a delete behavior: an old client that still sends one is ignored, and the cleanup only trashes', async () => {
       const { api, rulesPath, createRule, deliver, sync, gmail } = await setup();
       const rule = await createRule('INBOX', { deleteBehavior: 'delete' });
+      expect(rule).not.toHaveProperty('deleteBehavior');
       deliver('INBOX', 'Hello');
       await sync();
 
       await api.request(`${rulesPath}/${rule.id}?cleanupGoogle=true`, { method: 'DELETE' });
 
-      expect(gmail()).toEqual([]);
+      expect(gmail().map((m) => m.labels)).toEqual([expect.arrayContaining(['TRASH'])]);
     });
 
     it('rejects a malformed cleanupGoogle value and unknown rules', async () => {

@@ -258,8 +258,5 @@ export function createRealGoogleMail(
     async untrash(id) {
       await guarded((gmail) => gmail.users.messages.untrash({ userId: 'me', id }), id);
     },
-    async delete(id) {
-      await guarded((gmail) => gmail.users.messages.delete({ userId: 'me', id }), id);
-    },
   };
 }

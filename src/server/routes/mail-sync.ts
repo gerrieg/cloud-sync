@@ -39,7 +39,7 @@ async function selectableFolders(providers: SyncProviders): Promise<AppleMailFol
 const mailRules: RuleKind<MailRuleRow, MailRulePatch, MailRuleDto> = {
   path: 'mail',
   cleanupFailure: 'Could not remove the synced emails from Gmail; the rule was kept',
-  parseOptions: (body) => parseRuleOptions(body, ['syncWindowDays', 'deleteBehavior', 'enabled']),
+  parseOptions: (body) => parseRuleOptions(body, ['syncWindowDays', 'enabled']),
   list: listMailRules,
   find: findMailRule,
   toDto: toMailRuleDto,

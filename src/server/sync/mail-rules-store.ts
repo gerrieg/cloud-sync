@@ -6,7 +6,7 @@ import { mailSyncRules } from '../db/schema.js';
 
 export type MailRuleRow = typeof mailSyncRules.$inferSelect;
 export type NewMailRule = Omit<typeof mailSyncRules.$inferInsert, 'id'>;
-export type MailRulePatch = Partial<Pick<MailRuleRow, 'syncWindowDays' | 'deleteBehavior' | 'enabled'>>;
+export type MailRulePatch = Partial<Pick<MailRuleRow, 'syncWindowDays' | 'enabled'>>;
 
 export function toMailRuleDto(row: MailRuleRow): MailRuleDto {
   return {
@@ -15,7 +15,6 @@ export function toMailRuleDto(row: MailRuleRow): MailRuleDto {
     appleFolderName: row.appleFolderName,
     googleLabel: row.googleLabel,
     syncWindowDays: row.syncWindowDays,
-    deleteBehavior: row.deleteBehavior,
     enabled: row.enabled,
   };
 }

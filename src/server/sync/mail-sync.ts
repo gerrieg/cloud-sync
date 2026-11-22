@@ -1,4 +1,4 @@
-import type { MailDeleteBehavior, MailRunResult, PlannedMailAction } from '../../shared/mail.js';
+import type { MailRunResult, PlannedMailAction } from '../../shared/mail.js';
 import { GMAIL_STARRED, GMAIL_UNREAD } from '../../shared/mail.js';
 import type { Clock } from '../clock.js';
 import type { AppDatabase } from '../db/index.js';
@@ -52,7 +52,6 @@ export interface MailDeletion extends GuardedDeletion {
   readonly uid: string;
   readonly summary: string;
   readonly googleMessageId: string;
-  readonly behavior: MailDeleteBehavior;
 }
 
 interface PlanEntry extends PlanEntryOf<PlannedMailAction, MailDeletion> {
@@ -117,13 +116,8 @@ export async function executeMailDeletion(
   item: MailDeletion,
 ): Promise<void> {
   const mail = env.providers.google.mail;
-  await ignoreGmailNotFound(() => (item.behavior === 'delete' ? mail.delete(item.googleMessageId) : mail.trash(item.googleMessageId)));
+  await ignoreGmailNotFound(() => mail.trash(item.googleMessageId));
   deleteSyncedEmail(env.db, item.syncedEmailId);
-}
-
-/** `trash` unless every rule involved says `delete`: the recoverable choice wins when rules disagree. */
-function behaviorFor(rules: readonly MailRuleRow[]): MailDeleteBehavior {
-  return rules.length > 0 && rules.every((rule) => rule.deleteBehavior === 'delete') ? 'delete' : 'trash';
 }
 
 async function readEnvelopes(
@@ -155,14 +149,13 @@ interface TrashRead {
   readonly reset: boolean;
 }
 
-function mailDeletion(row: SyncedEmailRow, behavior: MailDeleteBehavior): MailDeletion {
+function mailDeletion(row: SyncedEmailRow): MailDeletion {
   return {
     target: 'google',
     syncedEmailId: row.id,
     uid: row.messageIdKey,
     summary: row.summary,
     googleMessageId: row.googleMessageId,
-    behavior,
   };
 }
 
@@ -370,8 +363,8 @@ async function plan(
       return rule ? [rule] : [];
     });
 
-    const deletion = (reason: string, behavior: MailDeleteBehavior): PlanEntry => {
-      const item = mailDeletion(row, behavior);
+    const deletion = (reason: string): PlanEntry => {
+      const item = mailDeletion(row);
       return {
         report: report('delete', row.messageIdKey, row.summary, reason),
         ...(originRules[0] ? { ruleId: originRules[0].id } : {}),
@@ -385,15 +378,10 @@ async function plan(
       if (!trash || trash.reset || trash.listing.messages.some((message) => message.uid === row.trashUid)) {
         continue;
       }
-      const behavior = behaviorFor(originRules);
-      entries.push(
-        behavior === 'delete'
-          ? deletion('expunged', behavior)
-          : {
-              report: report('skip', row.messageIdKey, row.summary, 'no_longer_synced'),
-              apply: async () => deleteSyncedEmail(db, row.id),
-            },
-      );
+      entries.push({
+        report: report('skip', row.messageIdKey, row.summary, 'no_longer_synced'),
+        apply: async () => deleteSyncedEmail(db, row.id),
+      });
       continue;
     }
     if (inProcessed.length === 0) {
@@ -424,7 +412,7 @@ async function plan(
       });
       continue;
     }
-    entries.push(deletion('expunged', behaviorFor(originRules)));
+    entries.push(deletion('expunged'));
   }
   return entries;
 }
@@ -557,7 +545,7 @@ export async function removeRuleFromGoogle(env: {
       return other ? [other] : [];
     });
     if (keptRules.length === 0) {
-      await executeMailDeletion({ db, providers }, mailDeletion(row, rule.deleteBehavior));
+      await executeMailDeletion({ db, providers }, mailDeletion(row));
       continue;
     }
     if (!keptRules.some((other) => other.googleLabel === rule.googleLabel)) {
