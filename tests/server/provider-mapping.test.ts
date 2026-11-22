@@ -1,5 +1,5 @@
 import type { calendar_v3, people_v1 } from 'googleapis';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { DAVCalendar } from 'tsdav';
 import type { GoogleEvent, GoogleEventDraft } from '../../src/server/providers/calendar-types.js';
 import { describeAppleCalendar, fromApiEvent, instantOf, isEventCalendar, toApiEvent } from '../../src/server/providers/calendar-mapping.js';
@@ -163,6 +163,36 @@ describe('Google events', () => {
     expect(instantOf({ dateTime: '2026-03-10T09:00:00Z' })).toBe(Date.UTC(2026, 2, 10, 9));
     expect(instantOf({ date: '2026-03-10' })).toBe(Date.UTC(2026, 2, 10));
     expect(instantOf(undefined)).toBeNull();
+  });
+
+  describe('a start written as wall-clock time in a named time zone', () => {
+    // The Apple side writes `2026-03-24T10:00:00` + `Europe/Berlin`; Google reports the same instant as `…+01:00`.
+    // It must mean the same instant wherever the server runs, e.g. in a Docker container set to UTC.
+    const originalTz = process.env.TZ;
+    afterEach(() => {
+      if (originalTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTz;
+      }
+    });
+
+    it.each(['UTC', 'Europe/Berlin', 'America/Los_Angeles'])('is the same instant on a server in %s', (serverTz) => {
+      process.env.TZ = serverTz;
+
+      expect(instantOf({ dateTime: '2026-03-24T10:00:00', timeZone: 'Europe/Berlin' })).toBe(Date.UTC(2026, 2, 24, 9));
+      expect(instantOf({ dateTime: '2026-07-14T10:00:00', timeZone: 'Europe/Berlin' })).toBe(Date.UTC(2026, 6, 14, 8));
+      expect(instantOf({ dateTime: '2026-03-24T10:00:00', timeZone: 'America/New_York' })).toBe(Date.UTC(2026, 2, 24, 14));
+      expect(instantOf({ dateTime: '2026-03-24T10:00:00+01:00', timeZone: 'Europe/Berlin' })).toBe(Date.UTC(2026, 2, 24, 9));
+    });
+
+    it('lands on the right side of a daylight-saving change', () => {
+      process.env.TZ = 'UTC';
+
+      // Berlin switched to summer time at 02:00 on 2026-03-29
+      expect(instantOf({ dateTime: '2026-03-29T01:30:00', timeZone: 'Europe/Berlin' })).toBe(Date.UTC(2026, 2, 29, 0, 30));
+      expect(instantOf({ dateTime: '2026-03-29T03:30:00', timeZone: 'Europe/Berlin' })).toBe(Date.UTC(2026, 2, 29, 1, 30));
+    });
   });
 });
 

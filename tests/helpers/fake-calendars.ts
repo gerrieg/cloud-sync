@@ -10,6 +10,7 @@ import {
   type GoogleEvent,
   type GoogleEventDraft,
 } from '../../src/server/providers/calendar-types.js';
+import { instantOf } from '../../src/server/providers/calendar-mapping.js';
 import { GoogleAuthError, type SyncProviders } from '../../src/server/providers/types.js';
 
 export interface GoogleWrite {
@@ -46,6 +47,10 @@ export interface SeedGoogleEvent {
   start: GoogleDateTime;
   end: GoogleDateTime;
   iCalUID?: string;
+  recurrence?: readonly string[];
+  /** Makes it an overridden occurrence of that series. */
+  recurringEventId?: string;
+  originalStartTime?: GoogleDateTime;
 }
 
 /**
@@ -157,6 +162,9 @@ export class FakeCalendarWorld {
       end: event.end,
       iCalUID: event.iCalUID ?? `${this.next('uid')}@google.com`,
       reminders: { useDefault: false, overrides: [] },
+      ...(event.recurrence ? { recurrence: event.recurrence } : {}),
+      ...(event.recurringEventId ? { recurringEventId: event.recurringEventId } : {}),
+      ...(event.originalStartTime ? { originalStartTime: event.originalStartTime } : {}),
     };
     this.storeGoogleEvent(this.googleCalendar(refreshToken, calendarId), created);
     return created;
@@ -377,6 +385,21 @@ export class FakeCalendarWorld {
         };
       },
       insertEvent: async (calendarId, draft, options) => {
+        // As in Google, an overridden occurrence is the occurrence itself changed: writing it again
+        // replaces the one that is there instead of adding a second
+        const instance = draft.recurringEventId
+          ? [...this.googleCalendar(token, calendarId).events.values()].find(
+              (existing) =>
+                existing.recurringEventId === draft.recurringEventId &&
+                instantOf(existing.originalStartTime) === instantOf(draft.originalStartTime),
+            )
+          : undefined;
+        if (instance) {
+          await beforeWrite({ kind: 'update', calendarId, eventId: instance.id, sendUpdates: options.sendUpdates });
+          const replaced: GoogleEvent = { ...draft, id: instance.id };
+          this.storeGoogleEvent(this.googleCalendar(token, calendarId), replaced);
+          return replaced;
+        }
         await beforeWrite({ kind: 'insert', calendarId, eventId: null, sendUpdates: options.sendUpdates });
         const event: GoogleEvent = { ...draft, id: this.next('evt') };
         this.storeGoogleEvent(this.googleCalendar(token, calendarId), event);

@@ -62,8 +62,51 @@ export function fromApiEvent(event: calendar_v3.Schema$Event): GoogleEvent {
   };
 }
 
+const HAS_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+
+/** The offset of a time zone at an instant, in ms: what a wall clock there shows minus UTC. */
+function zoneOffsetMs(instant: number, timeZone: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    })
+      .formatToParts(instant)
+      .map((part) => [part.type, Number(part.value)]),
+  ) as Record<string, number>;
+  const wallClock = Date.UTC(parts.year!, parts.month! - 1, parts.day!, parts.hour!, parts.minute!, parts.second!);
+  return wallClock - Math.floor(instant / 1000) * 1000;
+}
+
+/** A wall-clock time like `2026-03-24T10:00:00` in a named zone, as an instant (the server's own zone plays no part). */
+function zonedInstant(wallClock: string, timeZone: string): number | null {
+  const asUtc = Date.parse(`${wallClock}Z`);
+  if (Number.isNaN(asUtc)) {
+    return null;
+  }
+  try {
+    // The offset is read at the first guess, then again at the corrected instant, which settles DST changes
+    const guess = asUtc - zoneOffsetMs(asUtc, timeZone);
+    return asUtc - zoneOffsetMs(guess, timeZone);
+  } catch {
+    return null; // not an IANA zone
+  }
+}
+
 export function instantOf(value: calendar_v3.Schema$EventDateTime | GoogleDateTime | undefined): number | null {
   if (value?.dateTime) {
+    if (value.timeZone && !HAS_OFFSET.test(value.dateTime)) {
+      const zoned = zonedInstant(value.dateTime, value.timeZone);
+      if (zoned !== null) {
+        return zoned;
+      }
+    }
     return new Date(value.dateTime).getTime();
   }
   return value?.date ? new Date(`${value.date}T00:00:00Z`).getTime() : null;
