@@ -37,6 +37,10 @@ function main(): void {
     process.exit(1);
   }
 
+  if (config.totpSecret === null) {
+    console.warn('TOTP_SECRET is not set: the login asks for username and password only (no authenticator code).');
+  }
+
   const dbContext = createDatabase(config.databasePath);
   const staticDir = resolveStaticDir();
   const { app, realtime } = createApp({ config, dbContext, staticDir });

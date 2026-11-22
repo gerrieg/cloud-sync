@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { loginAdmin } from '../lib/api.js';
+import { useEffect, useState, type FormEvent } from 'react';
+import { getTotpRequired, loginAdmin } from '../lib/api.js';
 
 interface LoginPageProps {
   onSuccess(username: string): void;
@@ -17,8 +17,21 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
+  const [totpRequired, setTotpRequired] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<{ message: string; locked: boolean } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getTotpRequired().then((required) => {
+      if (active) {
+        setTotpRequired(required);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -29,7 +42,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
       const outcome = await loginAdmin({
         username: username.trim(),
         password,
-        totpCode: totpCode.trim(),
+        ...(totpRequired ? { totpCode: totpCode.trim() } : {}),
       });
 
       if (outcome.ok) {
@@ -65,7 +78,9 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
           <p className="text-xs font-semibold tracking-wider text-sky-600 uppercase">Cloud Sync</p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">Sign in</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Enter your administrator credentials and 6-digit authenticator code.
+            {totpRequired
+              ? 'Enter your administrator credentials and 6-digit authenticator code.'
+              : 'Enter your administrator credentials.'}
           </p>
         </div>
 
@@ -115,25 +130,27 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
             />
           </div>
 
-          <div>
-            <label htmlFor="totpCode" className="block text-sm font-medium text-slate-700">
-              Authenticator code
-            </label>
-            <input
-              id="totpCode"
-              name="totpCode"
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              pattern="\d{6}"
-              placeholder="000000"
-              required
-              value={totpCode}
-              onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-widest text-slate-900 shadow-xs focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 focus:outline-none"
-            />
-          </div>
+          {totpRequired && (
+            <div>
+              <label htmlFor="totpCode" className="block text-sm font-medium text-slate-700">
+                Authenticator code
+              </label>
+              <input
+                id="totpCode"
+                name="totpCode"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                pattern="\d{6}"
+                placeholder="000000"
+                required
+                value={totpCode}
+                onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-widest text-slate-900 shadow-xs focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 focus:outline-none"
+              />
+            </div>
+          )}
 
           <button
             type="submit"

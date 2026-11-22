@@ -48,7 +48,6 @@ describe('parseConfig', () => {
   it.each([
     'USER_NAME',
     'USER_PASSWORD_HASH',
-    'TOTP_SECRET',
     'SESSION_SECRET',
     'ENCRYPTION_KEY',
     'GOOGLE_CLIENT_ID',
@@ -81,6 +80,12 @@ describe('parseConfig', () => {
     expect(() => parseConfig(env)).toThrow(/TOTP_SECRET/);
   });
 
+  it.each([undefined, '', '   '])('runs without a second factor when TOTP_SECRET is %j', (value) => {
+    const config = parseConfig(makeValidEnv({ TOTP_SECRET: value }));
+
+    expect(config.totpSecret).toBeNull();
+  });
+
   it('fails fast when ENCRYPTION_KEY does not decode to 32 bytes', () => {
     const env = makeValidEnv({ ENCRYPTION_KEY: 'deadbeef' });
 
@@ -106,6 +111,6 @@ describe('parseConfig', () => {
   });
 
   it('reports all invalid variables together in one clear error message', () => {
-    expect(() => parseConfig({})).toThrow(/USER_NAME.*USER_PASSWORD_HASH.*TOTP_SECRET.*SESSION_SECRET.*ENCRYPTION_KEY.*GOOGLE_CLIENT_ID.*GOOGLE_CLIENT_SECRET/s);
+    expect(() => parseConfig({})).toThrow(/USER_NAME.*USER_PASSWORD_HASH.*SESSION_SECRET.*ENCRYPTION_KEY.*GOOGLE_CLIENT_ID.*GOOGLE_CLIENT_SECRET/s);
   });
 });

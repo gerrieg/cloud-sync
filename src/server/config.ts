@@ -5,7 +5,8 @@ export type NodeEnv = 'development' | 'production' | 'test';
 export interface AppConfig {
   readonly userName: string;
   readonly userPasswordHash: string;
-  readonly totpSecret: string;
+  /** `null` turns the second factor off: the login then asks for username and password only. */
+  readonly totpSecret: string | null;
   readonly sessionSecret: string;
   readonly encryptionKey: Buffer;
   readonly googleClientId: string;
@@ -78,10 +79,8 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
   }
 
   const rawTotpSecret = env.TOTP_SECRET?.trim() ?? '';
-  let totpSecret = '';
-  if (!rawTotpSecret) {
-    issues.push('TOTP_SECRET is required');
-  } else {
+  let totpSecret: string | null = null;
+  if (rawTotpSecret) {
     const parsedTotp = parseTotpSecret(rawTotpSecret);
     if (!parsedTotp) {
       issues.push('TOTP_SECRET must be a valid base32 secret of at least 80 bits');

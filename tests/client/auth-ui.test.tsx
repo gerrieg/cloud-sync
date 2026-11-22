@@ -13,10 +13,17 @@ function jsonResponse(body: unknown, status = 200, headers?: Record<string, stri
 
 describe('Auth UI (fetch boundary)', () => {
   const fetchMock = vi.fn<typeof fetch>();
+  let totpRequired = true;
 
   beforeEach(() => {
     fetchMock.mockReset();
-    vi.stubGlobal('fetch', fetchMock);
+    totpRequired = true;
+    // The login screen asks what it must collect; every other request goes through `fetchMock`
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/auth/config'
+        ? Promise.resolve(jsonResponse({ totpRequired }))
+        : fetchMock(input, init),
+    );
     window.history.replaceState({}, '', '/login');
   });
 
@@ -54,6 +61,31 @@ describe('Auth UI (fetch boundary)', () => {
       password: 'secret-password',
       totpCode: '123456',
     });
+  });
+
+  it('asks only for username and password when the server has no TOTP_SECRET', async () => {
+    const user = userEvent.setup();
+    totpRequired = false;
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ username: 'admin' }, 200))
+      .mockResolvedValueOnce(jsonResponse([], 200));
+
+    render(<App />);
+    await screen.findByRole('heading', { name: /sign in/i });
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/authenticator code/i)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/enter your administrator credentials\./i)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/username/i), 'admin');
+    await user.type(screen.getByLabelText(/password/i), 'secret-password');
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(await screen.findByRole('button', { name: /log out/i })).toBeInTheDocument();
+    const [, loginInit] = fetchMock.mock.calls[1];
+    expect(JSON.parse(String(loginInit?.body))).toEqual({ username: 'admin', password: 'secret-password' });
   });
 
   it('displays credential error feedback on 401 login failure', async () => {

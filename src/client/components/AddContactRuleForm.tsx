@@ -15,8 +15,15 @@ export function AddContactRuleForm({ discovery, busy, onAdd }: AddContactRuleFor
   const [googleName, setGoogleName] = useState(discovery.google[0]?.resourceName ?? '');
   const [direction, setDirection] = useState<SyncDirection>('one_way');
 
-  if (discovery.apple.length === 0 || discovery.google.length === 0) {
-    return <p className="mt-4 text-sm text-slate-600">No Apple contact groups or Google labels found.</p>;
+  if (discovery.google.length === 0) {
+    return (
+      <p className="mt-4 text-sm text-slate-600">
+        No Google labels found. Create a label in Google Contacts first, then reload this page.
+      </p>
+    );
+  }
+  if (discovery.apple.length === 0) {
+    return <p className="mt-4 text-sm text-slate-600">No Apple contact groups found.</p>;
   }
 
   function handleSubmit(event: FormEvent) {

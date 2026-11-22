@@ -38,11 +38,11 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
       return c.json({ error: 'Invalid request body' }, 400);
     }
 
-    if (
-      typeof body?.username !== 'string' ||
-      typeof body?.password !== 'string' ||
-      typeof body?.totpCode !== 'string'
-    ) {
+    const { totpSecret } = config;
+    if (typeof body?.username !== 'string' || typeof body?.password !== 'string') {
+      return c.json({ error: 'Username and password are required' }, 400);
+    }
+    if (totpSecret && typeof body.totpCode !== 'string') {
       return c.json({ error: 'Username, password, and 6-digit TOTP code are required' }, 400);
     }
 
@@ -57,26 +57,28 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
       return c.json({ error: 'Invalid credentials' }, 401);
     }
 
-    const totpResult = verifyAndClaimTotp({
-      db,
-      totpSecret: config.totpSecret,
-      totpCode: body.totpCode.trim(),
-      clock,
-    });
+    if (totpSecret) {
+      const totpResult = verifyAndClaimTotp({
+        db,
+        totpSecret,
+        totpCode: (body.totpCode as string).trim(),
+        clock,
+      });
 
-    if (!totpResult.ok) {
-      if (totpResult.reason === 'locked') {
-        c.header('Retry-After', String(totpResult.retryAfterSeconds));
-        return c.json(
-          {
-            error: 'Too many failed verification attempts. Try again later.',
-            lockedUntil: totpResult.lockedUntil,
-            retryAfterSeconds: totpResult.retryAfterSeconds,
-          },
-          429,
-        );
+      if (!totpResult.ok) {
+        if (totpResult.reason === 'locked') {
+          c.header('Retry-After', String(totpResult.retryAfterSeconds));
+          return c.json(
+            {
+              error: 'Too many failed verification attempts. Try again later.',
+              lockedUntil: totpResult.lockedUntil,
+              retryAfterSeconds: totpResult.retryAfterSeconds,
+            },
+            429,
+          );
+        }
+        return c.json({ error: 'Invalid credentials' }, 401);
       }
-      return c.json({ error: 'Invalid credentials' }, 401);
     }
 
     const token = sealSession(config.userName, config.sessionSecret, clock);
@@ -84,6 +86,8 @@ export function createAuthRoutes(deps: AuthRouteDeps): Hono<{ Variables: AppVari
 
     return c.json({ username: config.userName }, 200);
   });
+
+  auth.get('/config', (c) => c.json({ totpRequired: config.totpSecret !== null }, 200));
 
   auth.get('/me', (c) => {
     const session = c.get('session');

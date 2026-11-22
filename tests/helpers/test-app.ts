@@ -87,12 +87,14 @@ export function createTestContext(options?: {
   };
   const { app, realtime } = createApp(appOptions);
 
-  const totp = new OTPAuth.TOTP({
-    secret: OTPAuth.Secret.fromBase32(config.totpSecret),
-    algorithm: 'SHA1',
-    digits: 6,
-    period: 30,
-  });
+  const totp = config.totpSecret
+    ? new OTPAuth.TOTP({
+        secret: OTPAuth.Secret.fromBase32(config.totpSecret),
+        algorithm: 'SHA1',
+        digits: 6,
+        period: 30,
+      })
+    : null;
 
   return {
     app,
@@ -108,7 +110,7 @@ export function createTestContext(options?: {
         body: JSON.stringify({
           username: TEST_USERNAME,
           password: TEST_PASSWORD,
-          totpCode: this.generateTotp(0),
+          ...(totp ? { totpCode: this.generateTotp(0) } : {}),
         }),
       });
       const cookie = response.headers.get('set-cookie')?.split(';')[0];
@@ -120,6 +122,9 @@ export function createTestContext(options?: {
       return cookie;
     },
     generateTotp(stepOffset = 0): string {
+      if (!totp) {
+        throw new Error('TOTP is disabled in this test context');
+      }
       return totp.generate({ timestamp: clock.now() + stepOffset * 30_000 });
     },
     close() {

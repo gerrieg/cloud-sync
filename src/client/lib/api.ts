@@ -35,10 +35,24 @@ export async function getCurrentAdmin(): Promise<AdminSession | null> {
   return { username: data.username };
 }
 
+/** Whether the login must collect an authenticator code; assumes yes when the server cannot be asked. */
+export async function getTotpRequired(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/auth/config', { credentials: 'same-origin' });
+    if (!response.ok) {
+      return true;
+    }
+    const data = (await response.json()) as { totpRequired?: unknown };
+    return data.totpRequired !== false;
+  } catch {
+    return true;
+  }
+}
+
 export async function loginAdmin(params: {
   username: string;
   password: string;
-  totpCode: string;
+  totpCode?: string;
 }): Promise<LoginOutcome> {
   const response = await fetch('/api/auth/login', {
     method: 'POST',

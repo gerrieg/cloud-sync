@@ -23,6 +23,7 @@ export interface AccessInput {
 const PUBLIC_EXACT_PATHS = new Set([
   '/login',
   '/api/auth/login',
+  '/api/auth/config',
   '/api/health',
   '/favicon.ico',
   '/favicon.svg',

@@ -36,6 +36,58 @@ describe('Single-Admin 2FA Auth & Session HTTP Seam', () => {
     ctx = undefined;
   });
 
+  describe('without TOTP_SECRET', () => {
+    const noTotp = { TOTP_SECRET: '' };
+
+    it('signs in with username and password only', async () => {
+      ctx = createTestContext({ envOverrides: noTotp });
+
+      const loginRes = await postLogin(ctx, { username: TEST_USERNAME, password: TEST_PASSWORD });
+
+      expect(loginRes.status).toBe(200);
+      const meRes = await ctx.app.request('/api/auth/me', { headers: { cookie: extractCookiePair(loginRes)! } });
+      expect(meRes.status).toBe(200);
+    });
+
+    it('still rejects a wrong password', async () => {
+      ctx = createTestContext({ envOverrides: noTotp });
+
+      const loginRes = await postLogin(ctx, { username: TEST_USERNAME, password: 'wrong' });
+
+      expect(loginRes.status).toBe(401);
+    });
+
+    it('does not lock the login after repeated failures of a code nobody asked for', async () => {
+      ctx = createTestContext({ envOverrides: noTotp });
+
+      for (let i = 0; i < 6; i += 1) {
+        await postLogin(ctx, { username: TEST_USERNAME, password: TEST_PASSWORD, totpCode: '000000' });
+      }
+      const loginRes = await postLogin(ctx, { username: TEST_USERNAME, password: TEST_PASSWORD });
+
+      expect(loginRes.status).toBe(200);
+    });
+  });
+
+  describe('GET /api/auth/config', () => {
+    it('is public and tells the login screen that a code is required when TOTP_SECRET is set', async () => {
+      ctx = createTestContext();
+
+      const res = await ctx.app.request('/api/auth/config');
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ totpRequired: true });
+    });
+
+    it('tells the login screen that no code is required without TOTP_SECRET', async () => {
+      ctx = createTestContext({ envOverrides: { TOTP_SECRET: '' } });
+
+      const res = await ctx.app.request('/api/auth/config');
+
+      await expect(res.json()).resolves.toEqual({ totpRequired: false });
+    });
+  });
+
   it('signs in with valid credentials + TOTP, sets encrypted httpOnly 30-day cookie, serves /api/auth/me, and logs out', async () => {
     ctx = createTestContext();
 
