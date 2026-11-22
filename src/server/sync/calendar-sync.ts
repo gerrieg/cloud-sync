@@ -171,14 +171,13 @@ class RulePlanner {
         : deletedInGoogle.has(row.googleEventId));
 
     // Pre-existing (Initial Sync) or newly created Google events: adopt matches instead of duplicating
-    let listed: readonly GoogleEvent[] = [];
     let unclaimed: GoogleEvent[];
     if (googleChanges) {
-      listed = googleChanges.events;
-      unclaimed = listed.filter((event) => !event.recurringEventId && !trackedGoogleIds.has(event.id));
+      unclaimed = googleChanges.events.filter(
+        (event) => !event.recurringEventId && !trackedGoogleIds.has(event.id),
+      );
     } else if (rule.initialSyncCompletedAt === null) {
-      listed = await this.google.listEvents(this.calendarId);
-      unclaimed = listed.filter((event) => !event.recurringEventId);
+      unclaimed = (await this.google.listEvents(this.calendarId)).filter((event) => !event.recurringEventId);
     } else {
       unclaimed = [];
     }
@@ -245,7 +244,7 @@ class RulePlanner {
       const match = findExistingMatch(unclaimed, translated);
       if (match) {
         unclaimed.splice(unclaimed.indexOf(match), 1);
-        entries.push(this.adopt(object, translated, match, listed));
+        entries.push(this.adopt(object, translated, match));
       } else {
         entries.push(this.create(object, translated));
       }
@@ -475,29 +474,12 @@ class RulePlanner {
     };
   }
 
-  /**
-   * Initial Sync found the event already in Google: link it, never create a duplicate. The
-   * overridden occurrences Google holds for the series are linked too, or the next change would
-   * create them a second time.
-   */
+  /** Initial Sync found the event already in Google: link it, never create a duplicate. */
   private adopt(
     object: AppleObjectRef,
     translated: TranslatedCalendarObject,
     match: GoogleEvent,
-    googleEvents: readonly GoogleEvent[],
   ): PlanEntry {
-    const exceptionIds: Record<string, string> = {};
-    translated.exceptions.forEach((exception, index) => {
-      const existing = googleEvents.find(
-        (event) =>
-          event.recurringEventId === match.id &&
-          event.originalStartTime !== undefined &&
-          googleStartKey(event.originalStartTime) === translated.exceptionMatchStarts[index],
-      );
-      if (existing) {
-        exceptionIds[exceptionKey(exception)] = existing.id;
-      }
-    });
     return {
       report: {
         action: 'skip',
@@ -508,7 +490,7 @@ class RulePlanner {
         foreignInvitation: translated.foreignInvitation,
       },
       apply: async () => {
-        this.record(object.href, object.etag, translated, match.id, exceptionIds, googleFingerprint(match));
+        this.record(object.href, object.etag, translated, match.id, {}, googleFingerprint(match));
       },
     };
   }

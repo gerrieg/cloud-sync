@@ -46,10 +46,6 @@ export interface SeedGoogleEvent {
   start: GoogleDateTime;
   end: GoogleDateTime;
   iCalUID?: string;
-  recurrence?: readonly string[];
-  /** Makes it an overridden occurrence of that series. */
-  recurringEventId?: string;
-  originalStartTime?: GoogleDateTime;
 }
 
 /**
@@ -161,9 +157,6 @@ export class FakeCalendarWorld {
       end: event.end,
       iCalUID: event.iCalUID ?? `${this.next('uid')}@google.com`,
       reminders: { useDefault: false, overrides: [] },
-      ...(event.recurrence ? { recurrence: event.recurrence } : {}),
-      ...(event.recurringEventId ? { recurringEventId: event.recurringEventId } : {}),
-      ...(event.originalStartTime ? { originalStartTime: event.originalStartTime } : {}),
     };
     this.storeGoogleEvent(this.googleCalendar(refreshToken, calendarId), created);
     return created;
