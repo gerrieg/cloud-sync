@@ -28,6 +28,7 @@ export function CalendarRuleRow({ rule, busy, onUpdate, onDelete }: CalendarRule
         />
         <WindowSelect
           value={rule.syncWindowDays}
+          allLabel="All history (since 1990)"
           disabled={busy}
           onChange={(syncWindowDays) => onUpdate(rule.id, { syncWindowDays })}
         />

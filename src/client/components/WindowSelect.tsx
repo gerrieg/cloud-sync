@@ -6,10 +6,12 @@ interface WindowSelectProps {
   disabled?: boolean;
   /** Defaults to `History window`. */
   label?: string;
+  /** Defaults to `All history`. */
+  allLabel?: string;
   onChange(value: number | null): void;
 }
 
-export function WindowSelect({ value, disabled, label = 'History window', onChange }: WindowSelectProps) {
+export function WindowSelect({ value, disabled, label = 'History window', allLabel = 'All history', onChange }: WindowSelectProps) {
   return (
     <label className="text-sm text-slate-700">
       {label}
@@ -21,7 +23,7 @@ export function WindowSelect({ value, disabled, label = 'History window', onChan
       >
         <option value="30">Last 30 days</option>
         {value !== null && value !== 30 && <option value={String(value)}>Last {value} days</option>}
-        <option value="all">All history</option>
+        <option value="all">{allLabel}</option>
       </select>
     </label>
   );

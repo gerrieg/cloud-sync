@@ -33,6 +33,8 @@ import {
 } from './sync-store.js';
 
 const DAY_MS = 86_400_000;
+/** Where "All history" begins: older single events and series that ended before are not synced. */
+const ALL_HISTORY_START_MS = Date.UTC(1990, 0, 1);
 /** Google must never email invitation updates for events we mirror. */
 const NO_NOTIFICATIONS: GoogleWriteOptions = { sendUpdates: 'none' };
 
@@ -183,7 +185,7 @@ class RulePlanner {
     }
 
     const windowStart =
-      rule.syncWindowDays === null ? null : options.clock.now() - rule.syncWindowDays * DAY_MS;
+      rule.syncWindowDays === null ? ALL_HISTORY_START_MS : options.clock.now() - rule.syncWindowDays * DAY_MS;
     const entries: PlanEntry[] = [];
     const seen = new Set<string>();
 
@@ -225,7 +227,7 @@ class RulePlanner {
         continue;
       }
 
-      if (windowStart !== null && translated.lastEndMs !== null && translated.lastEndMs < windowStart) {
+      if (translated.lastEndMs !== null && translated.lastEndMs < windowStart) {
         // Its Google twin must not be mistaken for a Google-only event and imported again
         const twin = findExistingMatch(unclaimed, translated);
         if (twin) {
@@ -266,11 +268,11 @@ class RulePlanner {
   }
 
   /** An event that only exists in Google: create its Apple counterpart and track the pair. */
-  private importFromGoogle(event: GoogleEvent, windowStart: number | null): PlanEntry {
+  private importFromGoogle(event: GoogleEvent, windowStart: number): PlanEntry {
     const { options, rule, apple } = this.context;
     const uid = event.iCalUID || `google-${event.id}@cloud-sync`;
     const endMs = Date.parse(googleStartKey(event.end) ?? '');
-    if (windowStart !== null && !event.recurrence && !Number.isNaN(endMs) && endMs < windowStart) {
+    if (!event.recurrence && !Number.isNaN(endMs) && endMs < windowStart) {
       return this.skip(uid, event.summary, 'outside_window');
     }
     let ics: string;

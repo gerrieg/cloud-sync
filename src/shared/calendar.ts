@@ -32,7 +32,7 @@ export interface CalendarRuleDto {
   readonly googleCalendarId: string;
   readonly googleCalendarName: string;
   readonly direction: SyncDirection;
-  /** Days of history to sync; null means all history. */
+  /** Days of history to sync; null means all history, which for calendars starts on 1 January 1990. */
   readonly syncWindowDays: number | null;
   readonly syncReminders: boolean;
   readonly enabled: boolean;

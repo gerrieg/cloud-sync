@@ -71,7 +71,7 @@ export function AddCalendarRuleForm({ discovery, busy, onAdd }: AddCalendarRuleF
         </select>
       </label>
       <DirectionSelect value={direction} readOnlyCalendar={readOnly} onChange={setDirection} />
-      <WindowSelect value={syncWindowDays} onChange={setSyncWindowDays} />
+      <WindowSelect value={syncWindowDays} allLabel="All history (since 1990)" onChange={setSyncWindowDays} />
       <label className={checkboxLabelClass}>
         <input
           type="checkbox"

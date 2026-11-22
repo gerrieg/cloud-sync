@@ -39,7 +39,7 @@ export const calendarSyncRules = sqliteTable(
     direction: text('direction', { enum: ['one_way', 'bidirectional'] })
       .notNull()
       .default('one_way'),
-    /** Days of history to sync; null means all history. */
+    /** Days of history to sync; null means all history (calendars: since 1 January 1990). */
     syncWindowDays: integer('sync_window_days').default(30),
     syncReminders: integer('sync_reminders', { mode: 'boolean' }).notNull().default(false),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),

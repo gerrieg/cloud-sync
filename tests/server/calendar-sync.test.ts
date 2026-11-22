@@ -368,6 +368,38 @@ describe('One-way calendar sync HTTP seam', () => {
       });
     });
 
+    it('starts "All history" in 1990: older single events are left out, series without an end always come along', async () => {
+      const { api, world, profile } = await setup({ syncWindowDays: null });
+      const event = (uid: string, summary: string, start: string, extra: string[] = []) =>
+        [
+          'BEGIN:VCALENDAR',
+          'VERSION:2.0',
+          'PRODID:-//Apple Inc.//iOS 18.2//EN',
+          'BEGIN:VEVENT',
+          'DTSTAMP:20260105T090500Z',
+          `UID:${uid}`,
+          `SUMMARY:${summary}`,
+          `DTSTART;VALUE=DATE:${start}`,
+          ...extra,
+          'END:VEVENT',
+          'END:VCALENDAR',
+          '',
+        ].join('\r\n');
+      world.putAppleEvent(APPLE_ID, HOME, 'a.ics', event('old', 'Vor 1990', '19851001'));
+      world.putAppleEvent(APPLE_ID, HOME, 'b.ics', event('new', 'Nach 1990', '19950601'));
+      world.putAppleEvent(APPLE_ID, HOME, 'c.ics', event('bday', 'Geburtstag', '19850315', ['RRULE:FREQ=YEARLY']));
+      world.putAppleEvent(APPLE_ID, HOME, 'd.ics', event('ended', 'Serie bis 1989', '19850101', ['RRULE:FREQ=WEEKLY;UNTIL=19891231']));
+
+      const result = (await (await sync(api, profile)).json()) as SyncRunResult;
+
+      expect(result.rules[0].actions.map((a) => [a.action, a.summary, a.reason])).toEqual([
+        ['skip', 'Vor 1990', 'outside_window'],
+        ['create', 'Nach 1990', undefined],
+        ['create', 'Geburtstag', undefined],
+        ['skip', 'Serie bis 1989', 'outside_window'],
+      ]);
+    });
+
     it('does not process paused rules', async () => {
       const { api, world, profile, rule } = await setup({ enabled: false });
       world.putAppleEvent(APPLE_ID, HOME, 'zahnarzt.ics', icsFixture('timed-berlin.ics'));
