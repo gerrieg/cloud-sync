@@ -601,6 +601,14 @@ async function run(options: ContactSyncOptions): Promise<ContactRunResult | null
   });
 }
 
+/**
+ * Contacts are tracked profile-wide: after any contact rule changed, the next run must look at the
+ * address book again, as an unchanged Apple side must not hide the changed rules.
+ */
+export function invalidateContactSync(db: AppDatabase, profileId: string): void {
+  setContactCursor(db, profileId, { appleCtag: null });
+}
+
 /** Plans (and, unless `dryRun`, applies) the profile-wide contact sync; null when there are no contact rules. */
 export async function runContactSync(options: ContactSyncOptions): Promise<ContactRunResult | null> {
   try {

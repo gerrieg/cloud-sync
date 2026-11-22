@@ -21,7 +21,7 @@ import { carryOutPlan, failedRun, ignoringNotFound, type PlanEntryOf } from './r
 import { googleFingerprint, googleStartKey } from './google-events.js';
 import { googleEventToIcs, patchIcsWithGoogle } from './google-ics.js';
 import { translateIcs, type TranslatedCalendarObject } from './ics.js';
-import { listRules, updateRule, type RuleRow } from './rules-store.js';
+import { findRule, listRules, updateRule, type RuleRow } from './rules-store.js';
 import { calendarRuleLabel } from './rule-labels.js';
 import { SyncLog } from './sync-log-store.js';
 import {
@@ -651,6 +651,16 @@ async function runRule(context: RuleContext): Promise<RuleRunResult> {
       }),
   });
   return { ruleId: rule.id, ...outcome };
+}
+
+/**
+ * Calendars are tracked per rule: after a rule changed, the next run must look at the calendar
+ * again, as an unchanged Apple side must not hide the changed options. `rule` may be gone already.
+ */
+export function invalidateCalendarRule(db: AppDatabase, rule: RuleRow): void {
+  if (findRule(db, rule.profileId, rule.id)) {
+    updateRule(db, rule.id, { appleCtag: null });
+  }
 }
 
 /** Plans (and, unless `dryRun`, applies) one-way Apple → Google sync for all rules of a Profile. */
