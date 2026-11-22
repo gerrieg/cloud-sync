@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { MailDeleteBehavior } from '../../shared/mail.js';
 import type { MailFolderDiscovery, MailRuleCreate } from '../lib/mail-api.js';
-import { secondaryButtonClass } from '../lib/styles.js';
+import { controlRowClass, secondaryButtonClass, selectClass } from '../lib/styles.js';
 import { DeleteBehaviorSelect } from './DeleteBehaviorSelect.js';
 import { WindowSelect } from './WindowSelect.js';
 
@@ -29,13 +29,13 @@ export function AddMailRuleForm({ discovery, busy, onAdd }: AddMailRuleFormProps
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-4 flex flex-wrap items-end gap-3">
+    <form onSubmit={handleSubmit} className={`mt-4 ${controlRowClass}`}>
       <label className="text-sm text-slate-700">
         iCloud folder
         <select
           value={path}
           onChange={(event) => setPath(event.target.value)}
-          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          className={selectClass}
         >
           {discovery.folders.map((folder) => (
             <option key={folder.path} value={folder.path}>
@@ -44,7 +44,7 @@ export function AddMailRuleForm({ discovery, busy, onAdd }: AddMailRuleFormProps
           ))}
         </select>
       </label>
-      <p className="pb-2 text-sm text-slate-700">
+      <p className="flex h-9 items-center gap-1 text-sm text-slate-700">
         Gmail label: <span className="font-medium">{target}</span>
       </p>
       <WindowSelect label="Start date" value={syncWindowDays} onChange={setSyncWindowDays} />

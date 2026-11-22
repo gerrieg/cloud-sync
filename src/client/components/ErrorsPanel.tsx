@@ -60,9 +60,9 @@ export function ErrorsPanel({ errors, onRetried }: ErrorsPanelProps) {
             <tbody>
               {errors.map((error) => (
                 <tr key={error.id} className="border-b border-slate-100 align-top">
-                  <td className="py-2 pr-4">{error.profileName}</td>
-                  <td className="py-2 pr-4">{ENTITY_TYPE_LABEL[error.entityType]}</td>
-                  <td className="py-2 pr-4">{error.ruleName ?? '—'}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{error.profileName}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{ENTITY_TYPE_LABEL[error.entityType]}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{error.ruleName ?? '—'}</td>
                   <td className="py-2 pr-4">{error.summary}</td>
                   <td className="py-2 pr-4 text-red-700">
                     {error.message}
@@ -72,10 +72,10 @@ export function ErrorsPanel({ errors, onRetried }: ErrorsPanelProps) {
                       </p>
                     )}
                   </td>
-                  <td className="py-2 pr-4 text-slate-500">
+                  <td className="py-2 pr-4 whitespace-nowrap text-slate-500">
                     <TimeStamp at={error.createdAt} />
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 whitespace-nowrap">
                     <button
                       type="button"
                       disabled={retrying !== null}

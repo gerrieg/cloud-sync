@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { secondaryButtonClass } from '../lib/styles.js';
+import { controlRowClass, inputClass, secondaryButtonClass } from '../lib/styles.js';
 import { useAsyncAction } from '../lib/use-async-action.js';
 import {
   testAppleConnection,
@@ -55,7 +55,7 @@ export function AppleConnection({ profile, onChange }: AppleConnectionProps) {
           : 'Not connected. Use an app-specific password from appleid.apple.com.'}
       </p>
 
-      <form onSubmit={handleSave} className="mt-4 flex flex-wrap items-end gap-3">
+      <form onSubmit={handleSave} className={`mt-4 ${controlRowClass}`}>
         <label className="text-sm text-slate-700">
           Apple ID
           <input
@@ -63,7 +63,7 @@ export function AppleConnection({ profile, onChange }: AppleConnectionProps) {
             value={appleId}
             onChange={(event) => setAppleId(event.target.value)}
             autoComplete="off"
-            className="mt-1 block w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            className={inputClass}
           />
         </label>
         <label className="text-sm text-slate-700">
@@ -74,7 +74,7 @@ export function AppleConnection({ profile, onChange }: AppleConnectionProps) {
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="new-password"
             placeholder={profile.appleConnected ? '•••• stored encrypted' : ''}
-            className="mt-1 block w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            className={inputClass}
           />
         </label>
         <button

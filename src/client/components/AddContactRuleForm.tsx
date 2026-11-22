@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import type { SyncDirection } from '../../shared/calendar.js';
 import type { ContactGroupDiscovery, ContactRuleCreate } from '../lib/contacts-api.js';
-import { secondaryButtonClass } from '../lib/styles.js';
-import { DirectionSelect } from './DirectionSelect.js';
+import { controlRowClass, secondaryButtonClass, selectClass } from '../lib/styles.js';
+import { BidirectionalHint, DirectionSelect } from './DirectionSelect.js';
 
 interface AddContactRuleFormProps {
   discovery: ContactGroupDiscovery;
@@ -34,13 +34,13 @@ export function AddContactRuleForm({ discovery, busy, onAdd }: AddContactRuleFor
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-4 flex flex-wrap items-end gap-3">
+    <form onSubmit={handleSubmit} className={`mt-4 ${controlRowClass}`}>
       <label className="text-sm text-slate-700">
         Apple group
         <select
           value={appleUid}
           onChange={(event) => setAppleUid(event.target.value)}
-          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          className={selectClass}
         >
           {discovery.apple.map((group) => (
             <option key={group.uid} value={group.uid}>
@@ -54,7 +54,7 @@ export function AddContactRuleForm({ discovery, busy, onAdd }: AddContactRuleFor
         <select
           value={googleName}
           onChange={(event) => setGoogleName(event.target.value)}
-          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          className={selectClass}
         >
           {discovery.google.map((group) => (
             <option key={group.resourceName} value={group.resourceName}>
@@ -67,6 +67,9 @@ export function AddContactRuleForm({ discovery, busy, onAdd }: AddContactRuleFor
       <button type="submit" disabled={busy} className={secondaryButtonClass}>
         Add contact rule
       </button>
+      <div className="basis-full empty:hidden">
+        <BidirectionalHint direction={direction} />
+      </div>
     </form>
   );
 }

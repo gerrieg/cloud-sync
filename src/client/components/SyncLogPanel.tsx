@@ -5,9 +5,9 @@ import { listLogs } from '../lib/logs-api.js';
 import type { Profile } from '../lib/profiles-api.js';
 import { usePolling } from '../lib/use-polling.js';
 import { TimeStamp } from './TimeStamp.js';
+import { checkboxLabelClass, selectClass } from '../lib/styles.js';
 
 const REFRESH_INTERVAL_MS = 5_000;
-const selectClass = 'mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm';
 
 /** The live, filterable sync log across all Profiles. */
 export function SyncLogPanel({ profiles }: { profiles: readonly Profile[] }) {
@@ -34,7 +34,7 @@ export function SyncLogPanel({ profiles }: { profiles: readonly Profile[] }) {
       <div className="mt-4 flex flex-wrap items-end gap-4">
         <label className="text-sm text-slate-700">
           Profile filter
-          <select value={profileId} onChange={(event) => setProfileId(event.target.value)} className={selectClass}>
+          <select value={profileId} onChange={(event) => setProfileId(event.target.value)} className={`${selectClass} max-w-56`}>
             <option value="">All Profiles</option>
             {profiles.map((profile) => (
               <option key={profile.id} value={profile.id}>
@@ -45,7 +45,7 @@ export function SyncLogPanel({ profiles }: { profiles: readonly Profile[] }) {
         </label>
         <label className="text-sm text-slate-700">
           Type
-          <select value={entityType} onChange={(event) => setEntityType(event.target.value as LogEntityType | '')} className={selectClass}>
+          <select value={entityType} onChange={(event) => setEntityType(event.target.value as LogEntityType | '')} className={`${selectClass} max-w-56`}>
             <option value="">All types</option>
             {LOG_ENTITY_TYPES.map((type) => (
               <option key={type} value={type}>
@@ -56,7 +56,7 @@ export function SyncLogPanel({ profiles }: { profiles: readonly Profile[] }) {
         </label>
         <label className="text-sm text-slate-700">
           Level
-          <select value={level} onChange={(event) => setLevel(event.target.value as LogLevel | '')} className={selectClass}>
+          <select value={level} onChange={(event) => setLevel(event.target.value as LogLevel | '')} className={`${selectClass} max-w-56`}>
             <option value="">All levels</option>
             {LOG_LEVELS.map((value) => (
               <option key={value} value={value}>
@@ -65,7 +65,7 @@ export function SyncLogPanel({ profiles }: { profiles: readonly Profile[] }) {
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-2 pb-2 text-sm text-slate-700">
+        <label className={checkboxLabelClass}>
           <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
           Unresolved errors only
         </label>
@@ -94,16 +94,16 @@ export function SyncLogPanel({ profiles }: { profiles: readonly Profile[] }) {
             <tbody>
               {entries.map((entry) => (
                 <tr key={entry.id} className="border-b border-slate-100 align-top">
-                  <td className="py-2 pr-4 text-slate-500">
+                  <td className="py-2 pr-4 whitespace-nowrap text-slate-500">
                     <TimeStamp at={entry.createdAt} />
                   </td>
-                  <td className="py-2 pr-4">{entry.profileName}</td>
-                  <td className="py-2 pr-4">{ENTITY_TYPE_LABEL[entry.entityType]}</td>
-                  <td className={`py-2 pr-4 ${entry.level === 'error' ? 'text-red-700' : 'text-slate-700'}`}>
+                  <td className="py-2 pr-4 whitespace-nowrap">{entry.profileName}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{ENTITY_TYPE_LABEL[entry.entityType]}</td>
+                  <td className={`py-2 pr-4 whitespace-nowrap ${entry.level === 'error' ? 'text-red-700' : 'text-slate-700'}`}>
                     {LEVEL_LABEL[entry.level]}
                     {entry.level === 'error' && entry.resolvedAt !== null ? ' (resolved)' : ''}
                   </td>
-                  <td className="py-2 pr-4">{entry.ruleName ?? '—'}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{entry.ruleName ?? '—'}</td>
                   <td className="py-2 pr-4">
                     {entry.action && <span className="text-slate-500">{entry.action}: </span>}
                     <span>{entry.summary}</span>

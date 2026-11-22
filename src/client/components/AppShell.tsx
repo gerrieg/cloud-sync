@@ -18,6 +18,7 @@ import { GoogleConnection } from './GoogleConnection.js';
 import { MailSyncPanel } from './MailSyncPanel.js';
 import { ProfileSettingsPanel } from './ProfileSettingsPanel.js';
 import { ProfileSwitcher } from './ProfileSwitcher.js';
+import { secondaryButtonClass } from '../lib/styles.js';
 import { TriggerTokenPanel } from './TriggerTokenPanel.js';
 
 const VIEWS = ['overview', 'profile', 'errors', 'logs'] as const;
@@ -102,8 +103,8 @@ export function AppShell({ username, onLogout }: AppShellProps) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex min-h-16 max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 sm:px-6">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <span className="text-lg font-semibold tracking-tight text-slate-900">Cloud Sync</span>
             {profiles && (
               <ProfileSwitcher
@@ -116,14 +117,14 @@ export function AppShell({ username, onLogout }: AppShellProps) {
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+            <span className="inline-flex h-7 items-center rounded-full bg-slate-100 px-3 text-xs font-medium text-slate-700">
               {username}
             </span>
             <button
               type="button"
               onClick={handleLogout}
               disabled={loggingOut}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className={secondaryButtonClass}
             >
               {loggingOut ? 'Logging out…' : 'Log out'}
             </button>
@@ -142,9 +143,15 @@ export function AppShell({ username, onLogout }: AppShellProps) {
                 role="tab"
                 aria-selected={view === id}
                 onClick={() => show(id)}
-                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
-                  view === id ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'
-                } ${id === 'errors' && errorCount > 0 ? 'text-red-700' : ''}`}
+                className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium ${
+                  view === id ? 'border-slate-900' : 'border-transparent hover:text-slate-800'
+                } ${
+                  id === 'errors' && errorCount > 0
+                    ? 'text-red-700'
+                    : view === id
+                      ? 'text-slate-900'
+                      : 'text-slate-500'
+                }`}
               >
                 {label}
               </button>

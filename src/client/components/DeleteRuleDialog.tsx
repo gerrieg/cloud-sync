@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { secondaryButtonClass } from '../lib/styles.js';
+import { dangerButtonClass, secondaryButtonClass } from '../lib/styles.js';
 
 interface DeleteRuleDialogProps {
   /** e.g. `Delete calendar rule`. */
@@ -50,7 +50,7 @@ export function DeleteRuleDialog({ title, ruleLabel, items, cleanupLabel, busy, 
           <button
             type="button"
             disabled={busy}
-            className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            className={dangerButtonClass}
             onClick={() => onConfirm(cleanupGoogle)}
           >
             Confirm delete

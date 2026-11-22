@@ -23,10 +23,10 @@ const CALENDAR_CLASS: Record<GoogleCalendarMode, string> = {
 export function StatusBadges({ status }: { status: ProfileStatusDto }) {
   return (
     <>
-      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${MAIL_IDLE_CLASS[status.mailIdle]}`}>
+      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${MAIL_IDLE_CLASS[status.mailIdle]}`}>
         Mail IDLE: {status.mailIdle}
       </span>
-      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${CALENDAR_CLASS[status.googleCalendar]}`}>
+      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${CALENDAR_CLASS[status.googleCalendar]}`}>
         Google Calendar: {CALENDAR_LABEL[status.googleCalendar]}
       </span>
     </>

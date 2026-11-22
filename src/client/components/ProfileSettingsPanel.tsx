@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { secondaryButtonClass } from '../lib/styles.js';
+import { dangerButtonClass, inputClass, secondaryButtonClass } from '../lib/styles.js';
 import { useAsyncAction } from '../lib/use-async-action.js';
 import { deleteProfile, updateProfile, type Profile } from '../lib/profiles-api.js';
 import { ProfileStatusBadges } from './ProfileStatusBadges.js';
@@ -34,8 +34,8 @@ export function ProfileSettingsPanel({ profile, onChange, onDeleted }: ProfileSe
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-slate-900">{profile.name}</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-xl font-semibold break-words text-slate-900">{profile.name}</h1>
           {!profile.enabled && (
             <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
               Paused
@@ -43,7 +43,7 @@ export function ProfileSettingsPanel({ profile, onChange, onDeleted }: ProfileSe
           )}
           <ProfileStatusBadges profileId={profile.id} />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             disabled={busy}
@@ -59,7 +59,7 @@ export function ProfileSettingsPanel({ profile, onChange, onDeleted }: ProfileSe
               <button
                 type="button"
                 disabled={busy}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                className={dangerButtonClass}
                 onClick={() =>
                   void run(async () => {
                     await deleteProfile(profile.id);
@@ -85,14 +85,14 @@ export function ProfileSettingsPanel({ profile, onChange, onDeleted }: ProfileSe
         </div>
       </div>
 
-      <form onSubmit={handleRename} className="mt-5 flex items-end gap-2">
+      <form onSubmit={handleRename} className="mt-5 flex flex-wrap items-end gap-2">
         <label className="text-sm text-slate-700">
           Profile name
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
             maxLength={100}
-            className="mt-1 block w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            className={inputClass}
           />
         </label>
         <button type="submit" disabled={busy} className={secondaryButtonClass}>

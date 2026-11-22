@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import type { SyncDirection } from '../../shared/calendar.js';
 import type { CalendarDiscovery, CalendarRuleCreate } from '../lib/calendar-api.js';
-import { secondaryButtonClass } from '../lib/styles.js';
-import { DirectionSelect } from './DirectionSelect.js';
+import { checkboxLabelClass, controlRowClass, secondaryButtonClass, selectClass } from '../lib/styles.js';
+import { BidirectionalHint, DirectionSelect } from './DirectionSelect.js';
 import { WindowSelect } from './WindowSelect.js';
 
 interface AddCalendarRuleFormProps {
@@ -41,13 +41,13 @@ export function AddCalendarRuleForm({ discovery, busy, onAdd }: AddCalendarRuleF
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-4 flex flex-wrap items-end gap-3">
+    <form onSubmit={handleSubmit} className={`mt-4 ${controlRowClass}`}>
       <label className="text-sm text-slate-700">
         Apple calendar
         <select
           value={appleUrl}
           onChange={(event) => setAppleUrl(event.target.value)}
-          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          className={selectClass}
         >
           {discovery.apple.map((calendar) => (
             <option key={calendar.url} value={calendar.url}>
@@ -61,7 +61,7 @@ export function AddCalendarRuleForm({ discovery, busy, onAdd }: AddCalendarRuleF
         <select
           value={googleId}
           onChange={(event) => setGoogleId(event.target.value)}
-          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          className={selectClass}
         >
           {writableGoogle.map((calendar) => (
             <option key={calendar.id} value={calendar.id}>
@@ -72,7 +72,7 @@ export function AddCalendarRuleForm({ discovery, busy, onAdd }: AddCalendarRuleF
       </label>
       <DirectionSelect value={direction} readOnlyCalendar={readOnly} onChange={setDirection} />
       <WindowSelect value={syncWindowDays} onChange={setSyncWindowDays} />
-      <label className="flex items-center gap-2 pb-2 text-sm text-slate-700">
+      <label className={checkboxLabelClass}>
         <input
           type="checkbox"
           checked={syncReminders}
@@ -83,6 +83,11 @@ export function AddCalendarRuleForm({ discovery, busy, onAdd }: AddCalendarRuleF
       <button type="submit" disabled={busy} className={secondaryButtonClass}>
         Add rule
       </button>
+      {!readOnly && (
+        <div className="basis-full empty:hidden">
+          <BidirectionalHint direction={direction} />
+        </div>
+      )}
       {readOnly && (
         <p className="basis-full text-xs text-slate-500">
           Read-only calendars sync one-way (Apple → Google).

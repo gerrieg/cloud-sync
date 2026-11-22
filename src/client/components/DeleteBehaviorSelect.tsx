@@ -1,4 +1,5 @@
 import type { MailDeleteBehavior } from '../../shared/mail.js';
+import { selectClass } from '../lib/styles.js';
 
 interface DeleteBehaviorSelectProps {
   value: MailDeleteBehavior;
@@ -14,7 +15,7 @@ export function DeleteBehaviorSelect({ value, disabled, onChange }: DeleteBehavi
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as MailDeleteBehavior)}
-        className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+        className={selectClass}
       >
         <option value="trash">Move to Gmail Trash</option>
         <option value="delete">Delete permanently</option>

@@ -1,5 +1,5 @@
 import type { DeleteApprovalDto } from '../lib/delete-approvals-api.js';
-import { secondaryButtonClass } from '../lib/styles.js';
+import { secondaryButtonClass, warningButtonClass } from '../lib/styles.js';
 import { useAsyncAction } from '../lib/use-async-action.js';
 
 interface DeleteGuardBannerProps {
@@ -48,7 +48,7 @@ export function DeleteGuardBanner({ approvals, onApprove, onDismiss }: DeleteGua
               <button
                 type="button"
                 disabled={busy}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                className={warningButtonClass}
                 onClick={() => void run(() => onApprove(approval.id))}
               >
                 Approve

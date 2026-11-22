@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useAsyncAction } from '../lib/use-async-action.js';
 import type { Profile } from '../lib/profiles-api.js';
+import { primaryButtonClass } from '../lib/styles.js';
 
 interface ProfileSwitcherProps {
   profiles: readonly Profile[];
@@ -32,7 +33,7 @@ export function ProfileSwitcher({ profiles, selectedId, onSelect, onCreate }: Pr
           aria-label="Profile"
           value={selectedId ?? ''}
           onChange={(event) => onSelect(event.target.value)}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800"
+          className="h-9 max-w-48 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800"
         >
           {profiles.map((profile) => (
             <option key={profile.id} value={profile.id}>
@@ -48,12 +49,12 @@ export function ProfileSwitcher({ profiles, selectedId, onSelect, onCreate }: Pr
           onChange={(event) => setNewName(event.target.value)}
           placeholder="New Profile"
           maxLength={100}
-          className="w-36 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          className="h-9 w-36 rounded-lg border border-slate-300 bg-white px-3 text-sm"
         />
         <button
           type="submit"
           disabled={busy || !newName.trim()}
-          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className={primaryButtonClass}
         >
           Add Profile
         </button>

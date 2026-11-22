@@ -1,3 +1,5 @@
+import { secondaryButtonClass } from '../lib/styles.js';
+
 interface ErrorBannerProps {
   count: number;
   onShow(): void;
@@ -13,7 +15,7 @@ export function ErrorBanner({ count, onShow }: ErrorBannerProps) {
       <p className="text-sm font-medium text-red-800">
         {count} sync {count === 1 ? 'error needs' : 'errors need'} attention
       </p>
-      <button type="button" onClick={onShow} className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-800">
+      <button type="button" onClick={onShow} className={secondaryButtonClass}>
         Show errors
       </button>
     </div>
