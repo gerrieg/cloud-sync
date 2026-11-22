@@ -9,7 +9,7 @@ import type { AppConfig } from '../config.js';
 import type { AppDatabase } from '../db/index.js';
 import { GoogleAuthError, type SyncProvidersFactory } from '../providers/types.js';
 import { removeTrackedGoogleEvents } from '../sync/calendar-sync.js';
-import { listPendingApprovals, toApprovalDto } from '../sync/delete-guard.js';
+import { listPendingBatches } from '../sync/delete-approvals.js';
 import { runProfileSync } from '../sync/profile-sync.js';
 import { dropOpenErrors } from '../sync/sync-log-store.js';
 import type { ProfileLocks } from '../sync/profile-locks.js';
@@ -106,7 +106,7 @@ export function createCalendarRoutes(deps: CalendarRouteDeps): Hono<ProfileEnv> 
   }
 
   routes.get('/:id/delete-approvals', (c) =>
-    c.json(listPendingApprovals(db, c.get('profile').id).map((row) => toApprovalDto(db, row)), 200),
+    c.json(listPendingBatches(db, c.get('profile').id), 200),
   );
 
   routes.post('/:id/sync', (c) => runSync(c, false));

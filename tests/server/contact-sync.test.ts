@@ -377,7 +377,7 @@ describe('One-way contact sync HTTP seam', () => {
       const res = await api.request(`/api/delete-approvals/${approval.id}/approve`, { method: 'POST' });
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({ status: 'approved', domain: 'contacts' });
+      expect(await res.json()).toMatchObject({ status: 'approved', domain: 'contacts', label: 'Contacts' });
       expect(google().map((c) => c.data.givenName)).toEqual(['Vorname4']);
     });
 

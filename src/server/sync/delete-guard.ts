@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { DeleteApprovalDto, DeleteApprovalItemDto } from '../../shared/delete-guard.js';
+import type { DeleteApprovalItemDto } from '../../shared/delete-guard.js';
 import type { AppDatabase } from '../db/index.js';
-import { calendarSyncRules, pendingDeleteApprovals } from '../db/schema.js';
+import { pendingDeleteApprovals } from '../db/schema.js';
 
 /** A run that plans more deletions than this, or a larger share of the tracked items, is halted. */
 const DELETE_GUARD_MAX_ITEMS = 10;
@@ -114,27 +114,4 @@ export function resolveApproval(
 /** The full batch as recorded when the run was halted. */
 export function approvalItems<T extends GuardedDeletion>(row: ApprovalRow): T[] {
   return JSON.parse(row.items) as T[];
-}
-
-/** What a batch belongs to, for display. */
-function approvalLabel(db: AppDatabase, row: ApprovalRow): string {
-  const rule = row.ruleId
-    ? db.select().from(calendarSyncRules).where(eq(calendarSyncRules.id, row.ruleId)).get()
-    : undefined;
-  if (rule) {
-    return `${rule.appleCalendarName} → ${rule.googleCalendarName}`;
-  }
-  return row.domain === 'mail' ? 'Mail' : 'Contacts';
-}
-
-export function toApprovalDto(db: AppDatabase, row: ApprovalRow): DeleteApprovalDto {
-  return {
-    id: row.id,
-    domain: row.domain,
-    ruleId: row.ruleId,
-    label: approvalLabel(db, row),
-    status: row.status,
-    createdAt: row.createdAt,
-    items: approvalItems(row).map(({ uid, summary, target }) => ({ uid, summary, target })),
-  };
 }

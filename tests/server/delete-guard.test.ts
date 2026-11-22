@@ -120,7 +120,7 @@ describe('Delete Guard HTTP seam', () => {
       const res = await api.request(`/api/delete-approvals/${approval.id}/approve`, { method: 'POST' });
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({ id: approval.id, status: 'approved' });
+      expect(await res.json()).toMatchObject({ id: approval.id, status: 'approved', label: 'Privat → Anna' });
       expect(googleSummaries(world)).not.toContain('Termin 1');
       expect(googleSummaries(world)).not.toContain('Termin 2');
       expect(googleSummaries(world)).toContain('Termin 3');

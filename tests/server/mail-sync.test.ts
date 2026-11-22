@@ -460,6 +460,7 @@ describe('One-way mail sync (iCloud IMAP → Gmail) HTTP seam', () => {
       const res = await api.request(`/api/delete-approvals/${deleteApprovalId}/approve`, { method: 'POST' });
 
       expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ status: 'approved', domain: 'mail', label: 'Mail' });
       expect(gmail()).toHaveLength(5);
       expect(await pending()).toEqual([]);
     });
