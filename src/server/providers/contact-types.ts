@@ -80,6 +80,14 @@ export interface GoogleContactWrite {
   readonly removeGroups: readonly string[];
 }
 
+/** iCloud no longer serves the photo a vCard links to (HTTP 404 or 410): retrying cannot help. */
+export class ApplePhotoGoneError extends Error {
+  constructor(url: string, status: number) {
+    super(`iCloud contact photo is gone (HTTP ${status}): ${new URL(url).host}`);
+    this.name = 'ApplePhotoGoneError';
+  }
+}
+
 export class GoogleContactNotFoundError extends Error {
   constructor(resourceName: string) {
     super(`Google contact ${resourceName} not found`);

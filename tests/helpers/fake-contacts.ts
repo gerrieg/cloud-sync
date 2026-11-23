@@ -4,6 +4,7 @@ import {
   GoogleSyncTokenExpiredError,
 } from '../../src/server/providers/calendar-types.js';
 import {
+  ApplePhotoGoneError,
   GoogleContactNotFoundError,
   type AppleContactObject,
   type ContactData,
@@ -64,6 +65,7 @@ export class FakeContactWorld {
   private beforeNextApplePut: (() => void) | null = null;
   private photoFailure: Error | null = null;
   private readonly applePhotos = new Map<string, Buffer>();
+  private readonly gonePhotos = new Set<string>();
   private readonly writeRejections: { givenName: string; error: Error }[] = [];
   private counter = 0;
 
@@ -72,6 +74,11 @@ export class FakeContactWorld {
   /** A photo iCloud serves at `url`, which a vCard links to with `PHOTO;VALUE=uri`. */
   putApplePhoto(url: string, bytes: Buffer): void {
     this.applePhotos.set(url, bytes);
+  }
+
+  /** A photo link iCloud answers with 404: the photo is gone for good. */
+  putApplePhotoGone(url: string): void {
+    this.gonePhotos.add(url);
   }
 
   putAppleVCard(appleId: string, href: string, vcard: string): void {
@@ -210,6 +217,9 @@ export class FakeContactWorld {
       },
       fetchPhoto: async (url) => {
         this.photoDownloads.push(url);
+        if (this.gonePhotos.has(url)) {
+          throw new ApplePhotoGoneError(url, 404);
+        }
         const bytes = this.applePhotos.get(url);
         if (!bytes) {
           throw new Error(`No photo at ${url}`);

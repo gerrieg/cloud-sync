@@ -11,6 +11,7 @@ import {
   type AppleObjectRef,
 } from '../providers/calendar-types.js';
 import {
+  ApplePhotoGoneError,
   GoogleContactNotFoundError,
   type GoogleContact,
   type GoogleContactChanges,
@@ -303,8 +304,16 @@ function plan(
       return knownHash;
     }
     // Only a changed photo is downloaded from iCloud
-    const bytes = photo.bytes ?? (await providers.apple.contacts.fetchPhoto(photo.url ?? ''));
-    await providers.google.contacts.updatePhoto(resourceName, bytes);
+    try {
+      const bytes = photo.bytes ?? (await providers.apple.contacts.fetchPhoto(photo.url ?? ''));
+      await providers.google.contacts.updatePhoto(resourceName, bytes);
+    } catch (error) {
+      // A link iCloud no longer serves stays dead: the contact syncs without a photo, and the link
+      // is tried again only when it changes (the photo is set again in iCloud)
+      if (!(error instanceof ApplePhotoGoneError)) {
+        throw error;
+      }
+    }
     return photo.key;
   }
 

@@ -312,6 +312,35 @@ describe('One-way contact sync HTTP seam', () => {
     });
   });
 
+  describe('Photo links iCloud no longer serves', () => {
+    const URL_GONE = 'https://p01-contacts.icloud.com/1/wcs/AAA';
+    const URL_NEW = 'https://gateway.icloud.com/contacts/1/ck/card/BBB';
+    const link = (url: string, crop = 'ABClipRect_1&0&0&10&10&sig1') =>
+      `PHOTO;TYPE=JPEG;X-ABCROP-RECTANGLE=${crop};VALUE=uri:${url}`;
+
+    it('syncs the contact without its photo, does not retry the dead link, and picks up a new link', async () => {
+      const { sync, world, appleId, token, byName } = await setup();
+      world.putApplePhotoGone(URL_GONE);
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Vorname1', 'Nachname1', [link(URL_GONE)]));
+
+      expect((await sync()).status).toBe('ok');
+      expect(byName('Vorname1')).toBeDefined();
+      expect(world.photoUploads).toEqual([]);
+
+      // The dead link is not tried again, neither unchanged nor with an unrelated edit
+      expect((await sync()).status).toBe('skipped'); // address book unchanged
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Anders', 'Nachname1', [link(URL_GONE)]));
+      expect((await sync()).status).toBe('ok');
+      expect(world.photoDownloads).toEqual([URL_GONE]);
+
+      // A photo set again in iCloud brings a new link
+      world.putApplePhoto(URL_NEW, Buffer.from([8]));
+      world.putAppleVCard(appleId, '/card/u1.vcf', appleCard('u1', 'Anders', 'Nachname1', [link(URL_NEW, 'ABClipRect_1&0&0&10&10&sig2')]));
+      expect((await sync()).status).toBe('ok');
+      expect(world.googlePhoto(token, byName('Anders')!.resourceName)).toEqual(Buffer.from([8]));
+    });
+  });
+
   describe('Dry-Run', () => {
     it('previews exactly what the real run does, without writing anything', async () => {
       const { sync, dryRun, world, ctx, google } = await setup();

@@ -2,6 +2,7 @@ import { google, type people_v1 } from 'googleapis';
 import { createDAVClient } from 'tsdav';
 import { GoogleSyncTokenExpiredError } from './calendar-types.js';
 import {
+  ApplePhotoGoneError,
   GoogleContactNotFoundError,
   type AppleContactBook,
   type GoogleContact,
@@ -108,6 +109,9 @@ export function createRealAppleContacts(credentials: AppleCredentials | null): A
         headers: { Authorization: `Basic ${Buffer.from(`${credentials.appleId}:${credentials.appPassword}`).toString('base64')}` },
         signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS),
       });
+      if (response.status === 404 || response.status === 410) {
+        throw new ApplePhotoGoneError(url, response.status);
+      }
       if (!response.ok) {
         throw new Error(`iCloud contact photo download failed with HTTP ${response.status}`);
       }
