@@ -355,7 +355,11 @@ function plan(
 
   function syncKnown(row: SyncedContactRow, entry: AddressBookEntry, labels: string[]): PlanEntry {
     const stored = parseLabels(row);
-    const changed = row.appleEtag !== entry.object.etag || options.force;
+    // A new ETag alone proves nothing: the iPhone stores a card again when it is merely opened.
+    // Only a changed content is pushed (a row without fingerprint is pushed, as before).
+    const changed =
+      options.force ||
+      (row.appleEtag !== entry.object.etag && contactFingerprint(entry.card.data) !== row.googleFingerprint);
     const writable = bidi(row.appleContactUid);
     const edit = writable ? editedInGoogle(row) : undefined;
     const gone = writable && goneFromGoogle(row);

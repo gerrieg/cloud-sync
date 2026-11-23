@@ -78,6 +78,23 @@ describe('One-way contact sync HTTP seam', () => {
     expect(world.trace.filter((entry) => entry.startsWith('apple.contacts:'))).toEqual([]);
   });
 
+  it('does not write to Google when a contact is only saved again without a change', async () => {
+    const { sync, world, appleId } = await setup();
+    await sync();
+    const writes = world.googleWrites.length;
+
+    // Opening a contact on the iPhone can store the same card again: a new ETag, but the same content
+    world.putAppleVCard(
+      appleId,
+      '/card/u1.vcf',
+      appleCard('u1', 'Vorname1', 'Nachname1', ['EMAIL:u1@example.com', 'REV:2026-11-23T08:00:00Z']),
+    );
+    const again = await sync();
+
+    expect(again.actions.filter((a) => a.action !== 'skip')).toEqual([]);
+    expect(world.googleWrites).toHaveLength(writes);
+  });
+
   it('removes only the label when a contact leaves a synced group but stays in the address book', async () => {
     const { sync, google, setGroups, byName, world } = await setup();
     await sync();
