@@ -18,7 +18,7 @@ import {
 } from '../providers/contact-types.js';
 import type { SyncProviders } from '../providers/types.js';
 import { readAddressBook, type AddressBookEntry } from './address-book.js';
-import { contactFingerprint, findMatchingContact } from './contact-data.js';
+import { contactFingerprint, createAppleContactTwinIndex, createContactCandidateIndex } from './contact-data.js';
 import { listContactRules, updateContactRule, type ContactRuleRow } from './contact-rules-store.js';
 import {
   deleteSyncedContact,
@@ -130,7 +130,7 @@ function plan(
   const trackedResources = new Set(rows.map((row) => row.googleResourceName));
   // Google-only contacts: linked to an untracked Apple contact (Initial Sync) or imported into Apple
   const unclaimed = (google?.changes.contacts ?? []).filter((contact) => !trackedResources.has(contact.resourceName));
-  const candidates = google?.fullListing ? unclaimed : [];
+  const candidateIndex = createContactCandidateIndex(google?.fullListing ? unclaimed : []);
 
   // Google changes only reach contacts that a bidirectional rule claims
   const bidi = (uid: string) => enabled.some((rule) => rule.direction === 'bidirectional' && claims(rule, uid));
@@ -170,9 +170,8 @@ function plan(
       continue;
     }
     const labels = labelsOf(uid);
-    const match = findMatchingContact(candidates, entry.card.data);
+    const match = candidateIndex.claim(entry.card.data);
     if (match) {
-      candidates.splice(candidates.indexOf(match), 1);
       entries.push(adopt(entry, match, labels));
     } else {
       entries.push(create(entry, labels));
@@ -201,7 +200,14 @@ function plan(
     entries.push(released ? release(row) : remove(row));
   }
 
-  for (const contact of unclaimed) {
+  const remainingUnclaimed = unclaimed.filter((contact) => !candidateIndex.isClaimed(contact));
+  const untrackedApple =
+    remainingUnclaimed.length > 0
+      ? createAppleContactTwinIndex(
+          [...book.contacts.values()].filter(({ card }) => !tracked.has(card.uid)).map(({ card }) => card.data),
+        )
+      : null;
+  for (const contact of remainingUnclaimed) {
     const targets = enabled.filter(
       (rule) => rule.direction === 'bidirectional' && contact.groupResourceNames.includes(rule.googleGroupResourceName),
     );
@@ -209,9 +215,7 @@ function plan(
       continue;
     }
     // Its Apple twin may simply sit outside the rule's group: importing would duplicate it
-    const hasAppleTwin = [...book.contacts.values()].some(
-      ({ card }) => !tracked.has(card.uid) && findMatchingContact([contact], card.data) !== undefined,
-    );
+    const hasAppleTwin = untrackedApple?.hasTwin(contact.data) ?? false;
     entries.push(
       hasAppleTwin
         ? { report: report('skip', contact.resourceName, displayName(contact.data) || contact.resourceName, 'matches_apple_contact') }

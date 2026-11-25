@@ -1,5 +1,4 @@
 import { google, type calendar_v3 } from 'googleapis';
-import { createDAVClient } from 'tsdav';
 import type {
   AppleCalendarObject,
   GoogleCalendarInfo,
@@ -14,38 +13,19 @@ import {
   GoogleSyncTokenExpiredError,
 } from './calendar-types.js';
 import { describeAppleCalendar, fromApiEvent, instantOf, isEventCalendar, toApiEvent } from './calendar-mapping.js';
+import { createDavSession, createGoogleClient, type GoogleClientConfig } from './client-helpers.js';
 import { httpStatus, translateGoogleError } from './google-errors.js';
 import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
+
+export type { GoogleClientConfig };
 
 const ICLOUD_CALDAV_URL = 'https://caldav.icloud.com';
 
 type AppleCalendars = SyncProviders['apple']['calendars'];
 type GoogleCalendars = SyncProviders['google']['calendars'];
 
-export interface GoogleClientConfig {
-  readonly googleClientId: string;
-  readonly googleClientSecret: string;
-}
-
 export function createRealAppleCalendars(credentials: AppleCredentials | null): AppleCalendars {
-  // One DAV client per adapter: logging in (account discovery) happens once, not before every call.
-  // The calendars themselves are fetched per call, so their ctags are never stale.
-  let session: ReturnType<typeof createDAVClient> | undefined;
-  async function connect() {
-    if (!credentials) {
-      throw new Error('No Apple credentials configured');
-    }
-    session ??= createDAVClient({
-      serverUrl: ICLOUD_CALDAV_URL,
-      credentials: { username: credentials.appleId, password: credentials.appPassword },
-      authMethod: 'Basic',
-      defaultAccountType: 'caldav',
-    }).catch((error: unknown) => {
-      session = undefined;
-      throw error;
-    });
-    return session;
-  }
+  const connect = createDavSession(ICLOUD_CALDAV_URL, 'caldav', credentials);
 
   return {
     async list() {
@@ -54,11 +34,7 @@ export function createRealAppleCalendars(credentials: AppleCredentials | null): 
     },
     async listObjects(calendarUrl): Promise<AppleCalendarObject[]> {
       const client = await connect();
-      const calendar = (await client.fetchCalendars()).find((c) => c.url === calendarUrl);
-      if (!calendar) {
-        throw new Error(`Apple calendar ${calendarUrl} not found`);
-      }
-      const objects = await client.fetchCalendarObjects({ calendar });
+      const objects = await client.fetchCalendarObjects({ calendar: { url: calendarUrl } });
       return objects.flatMap((object) =>
         typeof object.data === 'string'
           ? [{ href: object.url, etag: object.etag ?? '', ics: object.data }]
@@ -67,11 +43,8 @@ export function createRealAppleCalendars(credentials: AppleCredentials | null): 
     },
     async putObject(calendarUrl, input) {
       const client = await connect();
-      const calendar = (await client.fetchCalendars()).find((c) => c.url === calendarUrl);
-      if (!calendar) {
-        throw new Error(`Apple calendar ${calendarUrl} not found`);
-      }
-      const href = input.href ?? new URL(`${encodeURIComponent(input.uid)}.ics`, calendar.url).href;
+      const calendar = { url: calendarUrl };
+      const href = input.href ?? new URL(`${encodeURIComponent(input.uid)}.ics`, calendarUrl).href;
       const response =
         input.href === null
           ? await client.createCalendarObject({
@@ -139,22 +112,7 @@ export function createRealGoogleCalendars(
   makeClient?: () => calendar_v3.Calendar,
 ): GoogleCalendars {
   const guard = <T>(call: () => Promise<T>, eventId?: string) => guarded(limit, call, eventId);
-  // One client per adapter: it refreshes the expired access token once, not before every call
-  let realClient: calendar_v3.Calendar | undefined;
-  function client(): calendar_v3.Calendar {
-    if (makeClient) {
-      return makeClient();
-    }
-    if (!tokens) {
-      throw new Error('Google account is not connected');
-    }
-    if (!realClient) {
-      const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
-      auth.setCredentials({ ...tokens });
-      realClient = google.calendar({ version: 'v3', auth });
-    }
-    return realClient;
-  }
+  const client = createGoogleClient(config, tokens, (auth) => google.calendar({ version: 'v3', auth }), makeClient);
 
   /** Occurrences of a series are separate Google events: find the one to override. */
   async function findInstance(calendarId: string, draft: GoogleEventDraft): Promise<string> {

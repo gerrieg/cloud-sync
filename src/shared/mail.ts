@@ -59,8 +59,8 @@ export interface MailRunResult {
 }
 
 /** Gmail system labels the sync maps iCloud state onto. */
-export const GMAIL_INBOX = 'INBOX';
-export const GMAIL_SENT = 'SENT';
+const GMAIL_INBOX = 'INBOX';
+const GMAIL_SENT = 'SENT';
 export const GMAIL_UNREAD = 'UNREAD';
 export const GMAIL_STARRED = 'STARRED';
 

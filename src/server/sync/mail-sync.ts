@@ -226,9 +226,16 @@ async function plan(
   }
 
   // A tracked message that vanished from its folder may just have moved to a folder of its own
-  // that holds it outside the window: only then is it worth reading the older headers
+  // that holds it outside the window: only then is it worth reading the older headers.
+  // Messages already sitting in iCloud Trash keep their old locations for restore detection, so
+  // exclude them while they are still present in Trash.
+  const trashUids = new Set(trash?.listing.messages.map((message) => message.uid) ?? []);
+  const stillInTrash = (row: SyncedEmailRow) =>
+    row.trashUid !== null && trash !== null && !trash.reset && trashUids.has(row.trashUid);
   const vanished = (row: SyncedEmailRow) =>
-    !presence.has(row.messageIdKey) && parseLocations(row).some((location) => processed.has(location.folder));
+    !presence.has(row.messageIdKey) &&
+    !stillInTrash(row) &&
+    parseLocations(row).some((location) => processed.has(location.folder));
   if (rows.some(vanished)) {
     for (const read of reads) {
       const path = read.rule.appleFolderPath;
@@ -375,7 +382,7 @@ async function plan(
 
     if (row.trashUid !== null) {
       // Already moved to the iCloud Trash: only its permanent removal from there is left to notice
-      if (!trash || trash.reset || trash.listing.messages.some((message) => message.uid === row.trashUid)) {
+      if (!trash || trash.reset || trashUids.has(row.trashUid)) {
         continue;
       }
       entries.push({
@@ -521,8 +528,8 @@ export function forgetRuleFolder(db: AppDatabase, profileId: string, rule: MailR
 }
 
 /**
- * Cleanup opt-in: removes the rule's label from the synced messages and trashes or deletes (as the
- * rule says) the ones no other rule keeps. Safe to retry after a failure.
+ * Cleanup opt-in: removes the rule's label from the synced messages and moves to Gmail's Trash
+ * the ones no other rule keeps. Safe to retry after a failure.
  */
 export async function removeRuleFromGoogle(env: {
   readonly db: AppDatabase;

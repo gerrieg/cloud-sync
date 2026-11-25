@@ -28,21 +28,24 @@ export interface RuleSyncPanelProps<Dto, Discovery, Create, Update, Result> {
     /** Names the rule, e.g. `Privat → Anna`. */
     readonly ruleLabel: (rule: Dto) => string;
   };
+  /** Shown when either account is not connected; omit to render nothing when disconnected. */
+  disconnectedMessage?: string;
   renderRule(rule: Dto, busy: boolean, onUpdate: (ruleId: string, patch: Update) => void, onDelete: (rule: Dto) => void): ReactNode;
   renderAddForm(discovery: Discovery, busy: boolean, onAdd: (rule: Create) => void): ReactNode;
-  renderResult(result: Result, dryRun: boolean): ReactNode;
+  renderResult(result: Result, dryRun: boolean, rules: readonly Dto[]): ReactNode;
 }
 
 /**
- * The panel of a profile-wide sync (contacts, mail): its rules, a way to add one, the dry-run,
- * sync and force buttons, and the result of the last run. The calendar panel already tells an
- * unconnected Profile to connect both accounts, so this one shows nothing then.
+ * The sync panel for a domain (calendars, contacts, mail): its rules, a way to add one, the
+ * dry-run, sync and force buttons, and the result of the last run.
  */
 export function RuleSyncPanel<Dto extends { readonly id: string }, Discovery, Create, Update, Result>(
   props: RuleSyncPanelProps<Dto, Discovery, Create, Update, Result>,
 ) {
   if (!props.profile.appleConnected || !props.profile.googleConnected) {
-    return null;
+    return props.disconnectedMessage ? (
+      <p className="mt-6 text-sm text-slate-600">{props.disconnectedMessage}</p>
+    ) : null;
   }
   return <ConnectedRuleSync {...props} />;
 }
@@ -123,7 +126,7 @@ function ConnectedRuleSync<Dto extends { readonly id: string }, Discovery, Creat
           {error ?? loadError}
         </p>
       )}
-      {result && renderResult(result.value, result.dryRun)}
+      {result && renderResult(result.value, result.dryRun, rules)}
 
       {deleting && (
         <DeleteRuleDialog

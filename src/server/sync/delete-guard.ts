@@ -13,7 +13,7 @@ export interface GuardedDeletion extends DeleteApprovalItemDto {}
 
 export type ApprovalRow = typeof pendingDeleteApprovals.$inferSelect;
 
-export function exceedsDeleteGuard(plannedDeletions: number, trackedItems: number): boolean {
+function exceedsDeleteGuard(plannedDeletions: number, trackedItems: number): boolean {
   return (
     plannedDeletions > DELETE_GUARD_MAX_ITEMS ||
     (trackedItems > 0 && plannedDeletions / trackedItems > DELETE_GUARD_MAX_SHARE)

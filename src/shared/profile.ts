@@ -104,7 +104,7 @@ export interface AppleTestReport extends AppleConnectionReport {
 }
 
 /** Outcome the Google OAuth callback reports to the UI via `/?profile=<id>&google=<outcome>`. */
-export const GOOGLE_LINK_OUTCOMES = ['connected', 'invalid_grant', 'error'] as const;
+const GOOGLE_LINK_OUTCOMES = ['connected', 'invalid_grant', 'error'] as const;
 export type GoogleLinkOutcome = (typeof GOOGLE_LINK_OUTCOMES)[number];
 
 export function parseGoogleLinkOutcome(value: string | null | undefined): GoogleLinkOutcome | null {

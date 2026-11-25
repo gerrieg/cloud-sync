@@ -13,7 +13,7 @@ import {
   syncRuns,
 } from '../db/schema.js';
 
-export const OVERVIEW_DOMAINS: readonly OverviewDomain[] = ['calendars', 'contacts', 'mail'];
+const OVERVIEW_DOMAINS: readonly OverviewDomain[] = ['calendars', 'contacts', 'mail'];
 
 const DAY_MS = 86_400_000;
 const RUN_RETENTION_DAYS = 7;

@@ -1,6 +1,6 @@
 import type { AppConfig } from '../config.js';
 
-export const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback';
+const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback';
 
 /** `PUBLIC_BASE_URL` when configured, otherwise the origin the request arrived on. */
 export function resolveGoogleRedirectUri(config: AppConfig, requestUrl: string): string {

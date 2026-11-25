@@ -99,19 +99,50 @@ function parseExceptionIds(row: SyncedEventRow): Record<string, string> {
   return JSON.parse(row.googleExceptionIds) as Record<string, string>;
 }
 
-/** Finds a pre-existing Google event for an Apple event: by iCal UID, else by title + start. */
-function findExistingMatch(
-  candidates: readonly GoogleEvent[],
-  translated: TranslatedCalendarObject,
-): GoogleEvent | undefined {
-  return (
-    candidates.find((event) => event.iCalUID === translated.uid) ??
-    candidates.find(
-      (event) =>
-        normalizeTitle(event.summary) === normalizeTitle(translated.master.summary) &&
-        googleStartKey(event.start) === translated.matchStart,
-    )
-  );
+function titleStartKey(summary: string, start: string | null | undefined): string {
+  return `${normalizeTitle(summary)}\0${start ?? '\x01'}`;
+}
+
+/** Pre-indexes unclaimed Google events by iCal UID and normalized title + start for O(1) matching. */
+function createUnclaimedEventIndex(events: readonly GoogleEvent[]) {
+  const remaining = new Set(events);
+  const byUid = new Map<string, GoogleEvent[]>();
+  const byTitleStart = new Map<string, GoogleEvent[]>();
+  const add = (map: Map<string, GoogleEvent[]>, key: string, event: GoogleEvent) => {
+    const bucket = map.get(key);
+    if (bucket) {
+      bucket.push(event);
+    } else {
+      map.set(key, [event]);
+    }
+  };
+  for (const event of events) {
+    add(byUid, event.iCalUID, event);
+    add(byTitleStart, titleStartKey(event.summary, googleStartKey(event.start)), event);
+  }
+  const takeFirst = (bucket: GoogleEvent[] | undefined): GoogleEvent | undefined => {
+    if (!bucket) {
+      return undefined;
+    }
+    while (bucket.length > 0) {
+      const candidate = bucket.shift()!;
+      if (remaining.has(candidate)) {
+        remaining.delete(candidate);
+        return candidate;
+      }
+    }
+    return undefined;
+  };
+  return {
+    /** Claims and returns a pre-existing Google event: by iCal UID, else by title + start. */
+    claim(translated: TranslatedCalendarObject): GoogleEvent | undefined {
+      return (
+        takeFirst(byUid.get(translated.uid)) ??
+        takeFirst(byTitleStart.get(titleStartKey(translated.master.summary, translated.matchStart)))
+      );
+    },
+    remaining,
+  };
 }
 
 function ignoreNotFound(work: () => Promise<void>): Promise<void> {
@@ -173,16 +204,17 @@ class RulePlanner {
         : deletedInGoogle.has(row.googleEventId));
 
     // Pre-existing (Initial Sync) or newly created Google events: adopt matches instead of duplicating
-    let unclaimed: GoogleEvent[];
+    let unclaimedEvents: GoogleEvent[];
     if (googleChanges) {
-      unclaimed = googleChanges.events.filter(
+      unclaimedEvents = googleChanges.events.filter(
         (event) => !event.recurringEventId && !trackedGoogleIds.has(event.id),
       );
     } else if (rule.initialSyncCompletedAt === null) {
-      unclaimed = (await this.google.listEvents(this.calendarId)).filter((event) => !event.recurringEventId);
+      unclaimedEvents = (await this.google.listEvents(this.calendarId)).filter((event) => !event.recurringEventId);
     } else {
-      unclaimed = [];
+      unclaimedEvents = [];
     }
+    const unclaimed = createUnclaimedEventIndex(unclaimedEvents);
 
     const windowStart =
       rule.syncWindowDays === null ? ALL_HISTORY_START_MS : options.clock.now() - rule.syncWindowDays * DAY_MS;
@@ -229,10 +261,7 @@ class RulePlanner {
 
       if (translated.lastEndMs !== null && translated.lastEndMs < windowStart) {
         // Its Google twin must not be mistaken for a Google-only event and imported again
-        const twin = findExistingMatch(unclaimed, translated);
-        if (twin) {
-          unclaimed.splice(unclaimed.indexOf(twin), 1);
-        }
+        unclaimed.claim(translated);
         entries.push(this.skip(translated.uid, translated.master.summary, 'outside_window'));
         continue;
       }
@@ -243,9 +272,8 @@ class RulePlanner {
         continue;
       }
 
-      const match = findExistingMatch(unclaimed, translated);
+      const match = unclaimed.claim(translated);
       if (match) {
-        unclaimed.splice(unclaimed.indexOf(match), 1);
         entries.push(this.adopt(object, translated, match));
       } else {
         entries.push(this.create(object, translated));
@@ -260,7 +288,7 @@ class RulePlanner {
 
     // Only bidirectional rules import what is left over; One-Way Sync leaves Google data untouched
     if (googleChanges) {
-      for (const event of unclaimed) {
+      for (const event of unclaimed.remaining) {
         entries.push(this.importFromGoogle(event, windowStart));
       }
     }
@@ -687,7 +715,7 @@ export function invalidateCalendarRule(db: AppDatabase, rule: RuleRow): void {
   }
 }
 
-/** Plans (and, unless `dryRun`, applies) one-way Apple → Google sync for all rules of a Profile. */
+/** Plans (and, unless `dryRun`, applies) one-way or bidirectional calendar sync for a Profile's rules. */
 export async function runCalendarSync(options: CalendarSyncOptions): Promise<SyncRunResult> {
   const { db, clock, profile, providers } = options;
   const appleCalendars = await providers.apple.calendars.list();

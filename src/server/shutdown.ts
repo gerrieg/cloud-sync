@@ -10,7 +10,7 @@ export interface ShutdownDeps {
   readonly timeoutMs?: number;
 }
 
-export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 25_000;
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 25_000;
 
 /**
  * Returns the signal handler for a clean stop: no new HTTP requests, no more scheduled work, IDLE

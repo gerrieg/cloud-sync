@@ -92,6 +92,13 @@
       "when": 1795352868384,
       "tag": "0012_recheck_contact_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795632443596,
+      "tag": "0013_sync_logs_indexes",
+      "breakpoints": true
     }
   ]
 }

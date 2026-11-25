@@ -1,0 +1,2 @@
+CREATE INDEX `sync_logs_created_idx` ON `sync_logs` (`created_at`);--> statement-breakpoint
+CREATE INDEX `sync_logs_open_errors_idx` ON `sync_logs` (`level`,`resolved_at`,`profile_id`,`entity_type`,`item_key`);

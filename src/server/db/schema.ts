@@ -232,7 +232,17 @@ export const syncLogs = sqliteTable(
     /** Set when a later run succeeded for the item; null while an error is open. */
     resolvedAt: integer('resolved_at'),
   },
-  (table) => [index('sync_logs_profile_created_idx').on(table.profileId, table.createdAt)],
+  (table) => [
+    index('sync_logs_profile_created_idx').on(table.profileId, table.createdAt),
+    index('sync_logs_created_idx').on(table.createdAt),
+    index('sync_logs_open_errors_idx').on(
+      table.level,
+      table.resolvedAt,
+      table.profileId,
+      table.entityType,
+      table.itemKey,
+    ),
+  ],
 );
 
 /** One finished run of one kind of data of a Profile (not recorded for dry runs), for the Overview. */

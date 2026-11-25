@@ -63,7 +63,7 @@ const kinds: Record<DeleteApprovalDomain, BatchKind> = {
   },
 };
 
-export function toApprovalDto(db: AppDatabase, row: ApprovalRow): DeleteApprovalDto {
+function toApprovalDto(db: AppDatabase, row: ApprovalRow): DeleteApprovalDto {
   return {
     id: row.id,
     domain: row.domain,

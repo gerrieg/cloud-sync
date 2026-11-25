@@ -12,7 +12,7 @@ import {
 } from './mail-types.js';
 import { translateGoogleError } from './google-errors.js';
 import { describeFolder, isMissingFolder, toEnvelope, toListedMessage } from './mail-mapping.js';
-import type { GoogleClientConfig } from './real-calendar.js';
+import { createGoogleClient, type GoogleClientConfig } from './client-helpers.js';
 import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
 
 export const ICLOUD_IMAP_HOST = 'imap.mail.me.com';
@@ -39,17 +39,94 @@ export function createRealAppleMail(credentials: AppleCredentials | null): Apple
     });
   }
 
-  /** iCloud caps concurrent IMAP connections, so every call uses one short-lived connection. */
-  async function withClient<T>(work: (client: ImapFlow) => Promise<T>): Promise<T> {
-    const client = newClient();
-    // imapflow emits connection errors; without a listener they would crash the process
-    client.on('error', () => undefined);
-    await client.connect();
-    try {
-      return await work(client);
-    } finally {
+  /** Closes the reused IMAP connection once a sync run goes idle so iCloud connection slots stay free. */
+  const IDLE_CLOSE_MS = 5_000;
+  let shared: ImapFlow | null = null;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let queue: Promise<unknown> = Promise.resolve();
+
+  function clearIdleTimer() {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  function dropShared(client: ImapFlow) {
+    if (shared === client) {
+      shared = null;
+    }
+  }
+
+  async function closeShared() {
+    clearIdleTimer();
+    const client = shared;
+    shared = null;
+    if (client) {
       await client.logout().catch(() => client.close());
     }
+  }
+
+  function scheduleIdleClose() {
+    clearIdleTimer();
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      queue = queue.then(closeShared, closeShared);
+    }, IDLE_CLOSE_MS);
+    idleTimer.unref();
+  }
+
+  async function ensureClient(): Promise<ImapFlow> {
+    if (shared && shared.usable) {
+      return shared;
+    }
+    if (shared) {
+      const stale = shared;
+      shared = null;
+      stale.close();
+    }
+    const client = newClient();
+    // imapflow emits connection errors; without a listener they would crash the process
+    client.on('error', () => dropShared(client));
+    client.on('close', () => dropShared(client));
+    try {
+      await client.connect();
+    } catch (error) {
+      client.close();
+      throw error;
+    }
+    shared = client;
+    return client;
+  }
+
+  /**
+   * iCloud caps concurrent IMAP connections, so one adapter reuses a single lazy, serialized
+   * connection across the calls of a sync run and logs out once it goes idle.
+   */
+  function withClient<T>(work: (client: ImapFlow) => Promise<T>): Promise<T> {
+    const run = async (): Promise<T> => {
+      clearIdleTimer();
+      const client = await ensureClient();
+      try {
+        return await work(client);
+      } catch (error) {
+        if (!client.usable) {
+          dropShared(client);
+          client.close();
+        }
+        throw error;
+      } finally {
+        if (shared) {
+          scheduleIdleClose();
+        }
+      }
+    };
+    const result = queue.then(run, run);
+    queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   async function inFolder<T>(client: ImapFlow, path: string, work: () => Promise<T>): Promise<T> {
@@ -179,22 +256,7 @@ export function createRealGoogleMail(
   /** Stands in for the Google client, for tests. */
   makeClient?: () => gmail_v1.Gmail,
 ): GoogleMail {
-  // One client per adapter: it refreshes the expired access token once, not before every call
-  let realClient: gmail_v1.Gmail | undefined;
-  function client(): gmail_v1.Gmail {
-    if (makeClient) {
-      return makeClient();
-    }
-    if (!tokens) {
-      throw new Error('Google account is not connected');
-    }
-    if (!realClient) {
-      const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
-      auth.setCredentials({ ...tokens });
-      realClient = google.gmail({ version: 'v1', auth });
-    }
-    return realClient;
-  }
+  const client = createGoogleClient(config, tokens, (auth) => google.gmail({ version: 'v1', auth }), makeClient);
 
   async function guarded<T>(call: (gmail: gmail_v1.Gmail) => Promise<T>, messageId?: string): Promise<T> {
     try {

@@ -1,6 +1,6 @@
 import { google, type people_v1 } from 'googleapis';
-import { createDAVClient } from 'tsdav';
 import { GoogleSyncTokenExpiredError } from './calendar-types.js';
+import { createDavSession, createGoogleClient, type DavClient, type GoogleClientConfig } from './client-helpers.js';
 import {
   ApplePhotoGoneError,
   GoogleContactNotFoundError,
@@ -12,7 +12,7 @@ import {
 } from './contact-types.js';
 import { fromPerson, membership, toPerson } from './contact-mapping.js';
 import { isExpiredSyncToken, translateGoogleError } from './google-errors.js';
-import { assertCalDavWrite, type GoogleClientConfig } from './real-calendar.js';
+import { assertCalDavWrite } from './real-calendar.js';
 import type { AppleCredentials, GoogleTokens, SyncProviders } from './types.js';
 
 const ICLOUD_CARDDAV_URL = 'https://contacts.icloud.com';
@@ -24,39 +24,31 @@ type AppleContacts = SyncProviders['apple']['contacts'];
 type GoogleContacts = SyncProviders['google']['contacts'];
 
 export function createRealAppleContacts(credentials: AppleCredentials | null): AppleContacts {
-  // One DAV client per adapter: logging in (account discovery) happens once, not before every call.
-  // The address book itself is fetched per call, so its ctag is never stale.
-  let session: ReturnType<typeof createDAVClient> | undefined;
-  async function connect() {
-    if (!credentials) {
-      throw new Error('No Apple credentials configured');
-    }
-    session ??= createDAVClient({
-      serverUrl: ICLOUD_CARDDAV_URL,
-      credentials: { username: credentials.appleId, password: credentials.appPassword },
-      authMethod: 'Basic',
-      defaultAccountType: 'carddav',
-    }).catch((error: unknown) => {
-      session = undefined;
-      throw error;
-    });
-    const client = await session;
+  const connect = createDavSession(ICLOUD_CARDDAV_URL, 'carddav', credentials);
+  // Cached once discovered: `ctag()` and `list()` still fetch fresh metadata so ctags are never stale,
+  // while `putObject()` reuses the URL without repeating `fetchAddressBooks()` on every write.
+  let cachedAddressBookUrl: string | undefined;
+
+  async function fetchAddressBook(client: DavClient) {
     // iCloud keeps all contacts, and the contact groups as vCards, in one address book
     const addressBook = (await client.fetchAddressBooks())[0];
     if (!addressBook) {
       throw new Error('No iCloud address book found');
     }
-    return { client, addressBook };
+    cachedAddressBookUrl = addressBook.url;
+    return addressBook;
   }
 
   const ctagOf = (addressBook: { ctag?: unknown }) => (typeof addressBook.ctag === 'string' ? addressBook.ctag : null);
 
   return {
     async ctag() {
-      return ctagOf((await connect()).addressBook);
+      const client = await connect();
+      return ctagOf(await fetchAddressBook(client));
     },
     async list(): Promise<AppleContactBook> {
-      const { client, addressBook } = await connect();
+      const client = await connect();
+      const addressBook = await fetchAddressBook(client);
       const cards = await client.fetchVCards({ addressBook });
       return {
         ctag: ctagOf(addressBook),
@@ -69,8 +61,10 @@ export function createRealAppleContacts(credentials: AppleCredentials | null): A
       };
     },
     async putObject(input) {
-      const { client, addressBook } = await connect();
-      const href = input.href ?? new URL(`${encodeURIComponent(input.uid)}.vcf`, addressBook.url).href;
+      const client = await connect();
+      const addressBookUrl = cachedAddressBookUrl ?? (await fetchAddressBook(client)).url;
+      const addressBook = { url: addressBookUrl };
+      const href = input.href ?? new URL(`${encodeURIComponent(input.uid)}.vcf`, addressBookUrl).href;
       const response =
         input.href === null
           ? await client.createVCard({
@@ -93,7 +87,7 @@ export function createRealAppleContacts(credentials: AppleCredentials | null): A
       return { href, etag };
     },
     async deleteObject(href, etag) {
-      const { client } = await connect();
+      const client = await connect();
       assertCalDavWrite(await client.deleteVCard({ vCard: { url: href, etag } }), href);
     },
     async fetchPhoto(url) {
@@ -129,22 +123,7 @@ export function createRealGoogleContacts(
   /** Stands in for the Google client, for tests. */
   makeClient?: () => people_v1.People,
 ): GoogleContacts {
-  // One client per adapter: it refreshes the expired access token once, not before every call
-  let realClient: people_v1.People | undefined;
-  function client(): people_v1.People {
-    if (makeClient) {
-      return makeClient();
-    }
-    if (!tokens) {
-      throw new Error('Google account is not connected');
-    }
-    if (!realClient) {
-      const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
-      auth.setCredentials({ ...tokens });
-      realClient = google.people({ version: 'v1', auth });
-    }
-    return realClient;
-  }
+  const client = createGoogleClient(config, tokens, (auth) => google.people({ version: 'v1', auth }), makeClient);
 
   async function guarded<T>(call: (people: people_v1.People) => Promise<T>, resourceName?: string): Promise<T> {
     try {

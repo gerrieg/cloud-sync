@@ -26,7 +26,7 @@ const ICLOUD_CALDAV_URL = 'https://caldav.icloud.com';
 const ICLOUD_CARDDAV_URL = 'https://contacts.icloud.com';
 const CHECK_TIMEOUT_MS = 15_000;
 
-export const GOOGLE_SCOPES = [
+const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/contacts',
   'https://www.googleapis.com/auth/gmail.modify',
