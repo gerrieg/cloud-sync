@@ -188,13 +188,15 @@ describe('overview and Sync All', () => {
       expect(await s.reloadProfile()).toMatchObject({ lastSyncStatus: 'error', lastSuccessfulSyncAt: s.ctx.clock.now() });
     });
 
-    it('lets only a full run of the calendar rules clear the Profile error', async () => {
+    it('lets only a full run across all domains clear the Profile error', async () => {
       const s = await calendarAndMail();
       await s.sync({});
       s.mail.clearImportRejections();
 
       await s.sync({ domain: 'calendars' });
+      expect(await s.reloadProfile()).toMatchObject({ lastSyncStatus: 'error' });
 
+      await s.sync({});
       expect(await s.reloadProfile()).toMatchObject({ lastSyncStatus: 'ok' });
     });
 

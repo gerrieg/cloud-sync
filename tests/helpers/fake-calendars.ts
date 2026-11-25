@@ -75,6 +75,8 @@ export class FakeCalendarWorld {
   readonly watchChannels: FakeWatchChannel[] = [];
   /** How long the fake Google keeps a notification channel alive; a test may shorten it. */
   watchLifetimeMs = FAKE_WATCH_LIFETIME_MS;
+  /** Optional hook invoked right before `events.watch` returns (e.g. to simulate an immediate `sync` webhook). */
+  onWatch: ((channel: FakeWatchChannel) => Promise<void> | void) | null = null;
   private readonly failingWatches = new Map<string, Error>();
 
   constructor(private readonly clock: { now(): number } = { now: () => Date.now() }) {}
@@ -347,6 +349,7 @@ export class FakeCalendarWorld {
           stopped: false,
         };
         this.watchChannels.push(channel);
+        await this.onWatch?.(channel);
         return { resourceId: channel.resourceId, expiresAt: channel.expiresAt };
       },
       stopWatch: async (channelId) => {

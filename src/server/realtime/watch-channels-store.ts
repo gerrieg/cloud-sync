@@ -16,6 +16,15 @@ export function insertWatchChannel(db: AppDatabase, row: WatchChannelRow): void 
   db.insert(googleWatchChannels).values(row).run();
 }
 
+/** Completes a pre-registered channel once Google returns its resourceId and expiry, preserving confirmedAt. */
+export function updateWatchChannel(
+  db: AppDatabase,
+  channelId: string,
+  patch: { readonly resourceId: string; readonly expiresAt: number },
+): void {
+  db.update(googleWatchChannels).set(patch).where(eq(googleWatchChannels.id, channelId)).run();
+}
+
 /** Records that Google reached the webhook through this channel (keeps the first time). */
 export function confirmWatchChannel(db: AppDatabase, channel: WatchChannelRow, at: number): void {
   if (channel.confirmedAt === null) {

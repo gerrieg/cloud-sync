@@ -203,5 +203,20 @@ describe('real-time mail sync', () => {
 
       expect(s.gmail().map((m) => m.raw)).toEqual([expect.stringContaining('Subject: Fallback')]);
     });
+
+    it('retries on the next STATUS poll when the triggered mail sync failed transiently', async () => {
+      const s = await scenario(['INBOX', 'Receipts']);
+      await s.tick();
+
+      s.deliver('Receipts', 'Retry Invoice');
+      s.world.rejectImportsContaining('Subject: Retry Invoice');
+      await s.tick(50_000);
+      expect(s.gmail()).toEqual([]);
+
+      // Without another folder change, the next poll retries once the outage is over
+      s.world.clearImportRejections();
+      await s.tick(50_000);
+      expect(s.gmail().map((m) => m.raw)).toEqual([expect.stringContaining('Subject: Retry Invoice')]);
+    });
   });
 });

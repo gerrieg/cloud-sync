@@ -230,6 +230,36 @@ describe('real-time calendar sync', () => {
       expect(channel!.stopped).toBe(true);
       expect(await s.status()).toMatchObject({ googleCalendar: 'inactive' });
     });
+
+    it('accepts and confirms the initial `sync` webhook even when it arrives before `events.watch` returns', async () => {
+      const s = await scenario();
+      let handshakeStatus = 0;
+      s.world.onWatch = async (channel) => {
+        handshakeStatus = (await s.notify(channel, 'sync')).status;
+      };
+
+      await s.tick();
+
+      expect(handshakeStatus).toBe(200);
+      expect(await s.status()).toMatchObject({ googleCalendar: 'webhook' });
+    });
+
+    it('stops the channel when the Profile is paused and registers a fresh one when re-enabled', async () => {
+      const s = await scenario();
+      await s.tick();
+      const [first] = s.channels();
+
+      await s.api.request(`/api/profiles/${s.profile.id}`, { method: 'PATCH', body: { enabled: false } });
+      await s.tick();
+      expect(first!.stopped).toBe(true);
+      expect(await s.status()).toMatchObject({ googleCalendar: 'inactive' });
+
+      await s.api.request(`/api/profiles/${s.profile.id}`, { method: 'PATCH', body: { enabled: true } });
+      await s.tick();
+      const [recreated] = s.channels();
+      expect(s.channels()).toHaveLength(1);
+      expect(recreated!.id).not.toBe(first!.id);
+    });
   });
 
   describe('syncToken polling', () => {
@@ -333,6 +363,20 @@ describe('real-time calendar sync', () => {
       await s.tick(30_000);
 
       expect(s.world.trace.filter((entry) => !entry.startsWith('apple.list:'))).toEqual([]);
+    });
+
+    it('retries on the next ctag poll when the triggered calendar sync failed transiently', async () => {
+      const s = await scenario({ direction: 'one_way', publicBaseUrl: null });
+      await s.tick();
+
+      s.world.putAppleEvent(APPLE_ID, HOME, 'retry.ics', simpleIcs('uid-retry', 'Retry Termin'));
+      s.world.failNextGoogleWrite(GOOGLE_REFRESH_TOKEN, new Error('Temporary Google outage'));
+      await s.tick(30_000);
+      expect(s.world.googleEvents(GOOGLE_REFRESH_TOKEN, 'primary')).toEqual([]);
+
+      // Without another Apple change, the next poll retries and succeeds
+      await s.tick(30_000);
+      expect(s.world.googleEvents(GOOGLE_REFRESH_TOKEN, 'primary').map((e) => e.summary)).toEqual(['Retry Termin']);
     });
   });
 });

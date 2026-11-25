@@ -63,9 +63,9 @@ export async function runProfileSync(options: ProfileSyncOptions): Promise<SyncR
   if (!dryRun) {
     const runFailed =
       calendars.rules.some((rule) => rule.status === 'error') || contacts?.status === 'error' || mail?.status === 'error';
-    // Only a run of all of the Profile's calendar rules can say that an earlier error is gone
-    const coversAllCalendarRules = covers('calendars') && ruleId === undefined;
-    const status = runFailed || (!coversAllCalendarRules && profile.lastSyncStatus === 'error') ? 'error' : 'ok';
+    // Only a full run across all domains can clear a previous error status
+    const coversAllDomains = domain === 'all' && ruleId === undefined;
+    const status = runFailed || (!coversAllDomains && profile.lastSyncStatus === 'error') ? 'error' : 'ok';
     recordSyncOutcome(db, profile.id, clock.now(), { status, runFailed });
   }
   return { ...calendars, ...(contacts ? { contacts } : {}), ...(mail ? { mail } : {}) };

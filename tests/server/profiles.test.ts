@@ -139,6 +139,56 @@ describe('Profile management HTTP seam', () => {
     expect((await api(`/api/profiles/${anna.id}`, { method: 'DELETE' })).status).toBe(404);
   });
 
+  it('waits for an in-flight sync before deleting a Profile', async () => {
+    await setup();
+    const anna = await createProfile('Anna');
+    const appleId = 'anna@icloud.com';
+    const refreshToken = 'refresh-anna';
+    ctx!.providers.calendars.addAppleCalendar(appleId, { url: '/cal/home/', name: 'Home' });
+    ctx!.providers.calendars.addGoogleCalendar(refreshToken, { id: 'primary', name: 'Anna', primary: true });
+    ctx!.providers.calendars.putAppleEvent(
+      appleId,
+      '/cal/home/',
+      'e1.ics',
+      'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:u1\r\nDTSTART:20260501T100000Z\r\nDTEND:20260501T110000Z\r\nSUMMARY:Test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+    );
+    await api(`/api/profiles/${anna.id}`, {
+      method: 'PATCH',
+      body: { appleId, appleAppPassword: 'abcd-efgh-ijkl-mnop' },
+    });
+    ctx!.providers.issueGoogleCode('ok', { refresh_token: refreshToken });
+    const authUrlRes = await api(`/api/profiles/${anna.id}/google/auth-url`);
+    const { url } = (await authUrlRes.json()) as { url: string };
+    const state = new URL(url).searchParams.get('state')!;
+    await api(`/api/auth/google/callback?code=ok&state=${encodeURIComponent(state)}`);
+    await api(`/api/profiles/${anna.id}/rules/calendars`, {
+      method: 'POST',
+      body: { appleCalendarUrl: '/cal/home/', googleCalendarId: 'primary', direction: 'one_way' },
+    });
+
+    const gate = ctx!.providers.calendars.holdGoogleWrites(refreshToken);
+    const order: string[] = [];
+    const syncPromise = Promise.resolve(api(`/api/profiles/${anna.id}/sync`, { method: 'POST', body: {} })).then((res) => {
+      order.push(`sync:${res.status}`);
+      return res;
+    });
+    // Yield so the sync acquires the Profile lock and reaches the held Google write
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const deletePromise = Promise.resolve(api(`/api/profiles/${anna.id}`, { method: 'DELETE' })).then((res) => {
+      order.push(`delete:${res.status}`);
+      return res;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(order).toEqual([]);
+
+    gate.release();
+    const [syncRes, deleteRes] = await Promise.all([syncPromise, deletePromise]);
+    expect(syncRes.status).toBe(200);
+    expect(deleteRes.status).toBe(204);
+    expect(order).toEqual(['sync:200', 'delete:204']);
+  });
+
   it('stores the Apple app-specific password encrypted and never returns it', async () => {
     await setup();
     const anna = await createProfile('Anna');

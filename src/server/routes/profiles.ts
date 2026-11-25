@@ -117,10 +117,14 @@ export function createProfileRoutes(deps: ProfileRouteDeps): Hono<ProfileEnv> {
     return c.json(toProfileDto(updateProfile(db, c.get('profile').id, patch)), 200);
   });
 
-  routes.delete('/:id', (c) => {
-    deleteProfile(db, c.get('profile').id);
-    return c.body(null, 204);
-  });
+  routes.delete('/:id', (c) =>
+    locks.run(c.get('profile').id, async () => {
+      if (!deleteProfile(db, c.get('profile').id)) {
+        return c.json({ error: 'Profile not found' }, 404);
+      }
+      return c.body(null, 204);
+    }),
+  );
 
   routes.post('/:id/test-apple', async (c) => {
     const context = toProvidersContext(c.get('profile'), config.encryptionKey);

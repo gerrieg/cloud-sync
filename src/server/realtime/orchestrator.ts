@@ -6,7 +6,6 @@ import type { ProfileStatusDto } from '../../shared/profile.js';
 import { encryptSecret } from '../crypto/secrets.js';
 import {
   findProfile,
-  isActive,
   listProfiles,
   toProvidersContext,
   type ProfileRow,
@@ -27,6 +26,7 @@ import {
   deleteWatchChannel,
   insertWatchChannel,
   listWatchChannels,
+  updateWatchChannel,
   type WatchChannelRow,
 } from './watch-channels-store.js';
 
@@ -48,6 +48,8 @@ const CONTACTS_POLL_INTERVAL_MS = 120_000;
 /** Channels are replaced once less than this is left of their lifetime. */
 const WATCH_RENEW_BEFORE_MS = 24 * 60 * 60_000;
 const WATCH_RETRY_INTERVAL_MS = 5 * 60_000;
+/** Temporary expiry for a channel pre-registered while `events.watch` is still in flight. */
+const PENDING_WATCH_TTL_MS = 5 * 60_000;
 
 interface IdleState {
   connection: InboxIdleConnection | null;
@@ -88,7 +90,7 @@ export interface RealtimeDeps {
  * webhooks) and funnels every trigger into one coalescing per-Profile sync queue.
  */
 export class RealtimeOrchestrator {
-  private readonly queued = new Map<string, Promise<void>>();
+  private readonly queued = new Map<string, Promise<boolean>>();
   private readonly inflight = new Set<Promise<unknown>>();
   private readonly runtimes = new Map<string, ProfileRuntime>();
   private timer: NodeJS.Timeout | null = null;
@@ -167,8 +169,9 @@ export class RealtimeOrchestrator {
   /**
    * Queues a sync of one domain behind the Profile's lock. A request that arrives while an
    * identical one is still waiting for its turn joins it instead of queueing another run.
+   * Resolves to `true` when the run completed without errors.
    */
-  requestSync(profileId: string, domain: SyncDomain): Promise<void> {
+  requestSync(profileId: string, domain: SyncDomain): Promise<boolean> {
     const key = `${profileId}:${domain}`;
     const waiting = this.queued.get(key);
     if (waiting) {
@@ -176,7 +179,7 @@ export class RealtimeOrchestrator {
     }
     const run = this.deps.locks.run(profileId, async () => {
       this.queued.delete(key);
-      await this.syncNow(profileId, domain);
+      return this.syncNow(profileId, domain);
     });
     this.queued.set(key, run);
     return this.track(run);
@@ -224,13 +227,12 @@ export class RealtimeOrchestrator {
 
   private async tickProfile(profile: ProfileRow): Promise<void> {
     const runtime = this.runtimeOf(profile.id);
-    const active = isActive(profile);
     const targets = pollingTargetsOf(this.deps.db, profile);
     const watched = targets.watchedGoogleCalendarIds;
     await Promise.all([
       this.step(profile, runtime, 'idle', () => this.maintainIdle(profile, runtime, targets.appleMailFolders.length > 0)),
       this.step(profile, runtime, 'mail', () => this.pollMail(profile, runtime, targets.appleMailFolders)),
-      this.step(profile, runtime, 'watch', () => this.maintainWatches(profile, runtime, active, watched)),
+      this.step(profile, runtime, 'watch', () => this.maintainWatches(profile, runtime, watched)),
       this.step(profile, runtime, 'ctag', () => this.pollCalendarTags(profile, runtime, targets.appleCalendarUrls)),
       this.step(profile, runtime, 'google', () => this.pollGoogleCalendars(profile, runtime, watched)),
       this.step(profile, runtime, 'contacts', () => this.pollContacts(profile, runtime, targets.hasContactRules)),
@@ -339,16 +341,19 @@ export class RealtimeOrchestrator {
       return;
     }
     runtime.lastMailPollAt = now;
+    const updates = new Map<string, string>();
     let changed = false;
     for (const status of await this.providersFor(profile).apple.mail.folderStatus(paths)) {
       const signature = `${status.uidValidity}:${status.uidNext}:${status.messages}:${status.unseen}`;
+      updates.set(status.path, signature);
       if (runtime.mailSignatures.get(status.path) !== signature) {
-        runtime.mailSignatures.set(status.path, signature);
         changed = true;
       }
     }
-    if (changed) {
-      await this.requestSync(profile.id, 'mail');
+    if (changed && (await this.requestSync(profile.id, 'mail'))) {
+      for (const [path, signature] of updates) {
+        runtime.mailSignatures.set(path, signature);
+      }
     }
   }
 
@@ -364,16 +369,15 @@ export class RealtimeOrchestrator {
 
   /**
    * Keeps one `events.watch` channel per watched Google calendar (only with a public URL),
-   * renews it before it lapses and stops channels nobody needs anymore.
+   * renews it before it lapses and stops channels nobody needs anymore (including when paused).
    */
   private async maintainWatches(
     profile: ProfileRow,
     runtime: ProfileRuntime,
-    active: boolean,
     watched: readonly string[],
   ): Promise<void> {
     const { db, clock, config } = this.deps;
-    if (!active) {
+    if (profile.googleTokensEnc === null || profile.googleReauthRequired) {
       return;
     }
     const needed = config.publicBaseUrl ? watched : [];
@@ -391,26 +395,30 @@ export class RealtimeOrchestrator {
     const providers = this.providersFor(profile);
     for (const row of stale) {
       await this.stopChannel(providers, row);
+      runtime.watchRetryAt.delete(row.googleCalendarId);
     }
     for (const calendarId of toRegister) {
       const channelId = crypto.randomUUID();
       const token = crypto.randomBytes(32).toString('base64url');
+      // Insert before calling `events.watch` so Google's immediate `sync` handshake is never rejected with 403
+      insertWatchChannel(db, {
+        id: channelId,
+        profileId: profile.id,
+        googleCalendarId: calendarId,
+        resourceId: '',
+        tokenEnc: encryptSecret(token, config.encryptionKey),
+        expiresAt: now + PENDING_WATCH_TTL_MS,
+        confirmedAt: null,
+      });
       try {
         const { resourceId, expiresAt } = await providers.google.calendars.watch(calendarId, {
           channelId,
           address: `${config.publicBaseUrl}/webhooks/google/${profile.id}`,
           token,
         });
-        insertWatchChannel(db, {
-          id: channelId,
-          profileId: profile.id,
-          googleCalendarId: calendarId,
-          resourceId,
-          tokenEnc: encryptSecret(token, config.encryptionKey),
-          expiresAt,
-          confirmedAt: null,
-        });
+        updateWatchChannel(db, channelId, { resourceId, expiresAt });
       } catch (error) {
+        deleteWatchChannel(db, channelId);
         if (error instanceof GoogleAuthError) {
           throw error;
         }
@@ -428,14 +436,16 @@ export class RealtimeOrchestrator {
   }
 
   private async stopChannel(providers: SyncProviders, row: WatchChannelRow): Promise<void> {
-    try {
-      await providers.google.calendars.stopWatch(row.id, row.resourceId);
-    } catch (error) {
-      if (error instanceof GoogleAuthError) {
-        throw error;
+    if (row.resourceId) {
+      try {
+        await providers.google.calendars.stopWatch(row.id, row.resourceId);
+      } catch (error) {
+        if (error instanceof GoogleAuthError) {
+          throw error;
+        }
+        // Google lets an unstopped channel lapse by itself, and a lapsed one is rejected by the webhook
+        console.error(`Stopping Google channel ${row.id} failed:`, error);
       }
-      // Google lets an unstopped channel lapse by itself, and a lapsed one is rejected by the webhook
-      console.error(`Stopping Google channel ${row.id} failed:`, error);
     }
     deleteWatchChannel(this.deps.db, row.id);
   }
@@ -455,6 +465,7 @@ export class RealtimeOrchestrator {
     }
     runtime.lastCtagPollAt = now;
     const calendars = await this.providersFor(profile).apple.calendars.list();
+    const updates = new Map<string, string | null>();
     let changed = false;
     for (const url of calendarUrls) {
       const ctag = calendars.find((calendar) => calendar.url === url)?.ctag ?? null;
@@ -463,10 +474,12 @@ export class RealtimeOrchestrator {
       if (!seen || (ctag !== null && runtime.calendarCtags.get(url) !== ctag)) {
         changed = true;
       }
-      runtime.calendarCtags.set(url, ctag);
+      updates.set(url, ctag);
     }
-    if (changed) {
-      await this.requestSync(profile.id, 'calendars');
+    if (changed && (await this.requestSync(profile.id, 'calendars'))) {
+      for (const [url, ctag] of updates) {
+        runtime.calendarCtags.set(url, ctag);
+      }
     }
   }
 
@@ -495,18 +508,24 @@ export class RealtimeOrchestrator {
     await this.requestSync(profile.id, 'contacts');
   }
 
-  private async syncNow(profileId: string, domain: SyncDomain): Promise<void> {
+  private async syncNow(profileId: string, domain: SyncDomain): Promise<boolean> {
     const { db, clock } = this.deps;
     const profile = findProfile(db, profileId);
     if (!profile || !profile.enabled || profile.googleReauthRequired) {
-      return;
+      return false;
     }
     try {
-      await this.runner.run(profile, (providers, current, appleId) =>
+      const outcome = await this.runner.run(profile, (providers, current, appleId) =>
         runProfileSync({ db, clock, profile: current, appleId, providers, domain, dryRun: false, force: false }),
       );
+      if (outcome.status !== 'done') {
+        return false;
+      }
+      const { rules, contacts, mail } = outcome.value;
+      return !rules.some((rule) => rule.status === 'error') && contacts?.status !== 'error' && mail?.status !== 'error';
     } catch (error) {
       console.error(`Background sync of Profile ${profile.id} failed:`, error);
+      return false;
     }
   }
 }
