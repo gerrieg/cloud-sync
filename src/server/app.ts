@@ -10,7 +10,9 @@ import { decideAccess } from './auth/access.js';
 import { SESSION_COOKIE_NAME, unsealSession, type SessionPayload } from './auth/session.js';
 import { systemClock, type Clock } from './clock.js';
 import type { AppConfig } from './config.js';
+import { encryptSecret } from './crypto/secrets.js';
 import type { DatabaseContext } from './db/index.js';
+import { findProfile, updateProfile } from './profiles/profile-store.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createRealSyncProviders } from './providers/real.js';
 import type { SyncProvidersFactory } from './providers/types.js';
@@ -41,6 +43,16 @@ export interface CloudSyncApp {
   readonly realtime: RealtimeOrchestrator;
 }
 
+const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
+  ['X-Content-Type-Options', 'nosniff'],
+  ['X-Frame-Options', 'DENY'],
+  ['Referrer-Policy', 'no-referrer'],
+  [
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  ],
+];
+
 export function createApp(options: CreateAppOptions): CloudSyncApp {
   const { config, dbContext, staticDir } = options;
   const clock = options.clock ?? systemClock;
@@ -50,9 +62,29 @@ export function createApp(options: CreateAppOptions): CloudSyncApp {
     createRealSyncProviders({
       googleClientId: config.googleClientId,
       googleClientSecret: config.googleClientSecret,
+      onGoogleTokensRefreshed: (profileId, tokens) => {
+        try {
+          const current = findProfile(dbContext.db, profileId);
+          if (current && current.googleTokensEnc !== null) {
+            updateProfile(dbContext.db, profileId, {
+              googleTokensEnc: encryptSecret(JSON.stringify(tokens), config.encryptionKey),
+            });
+          }
+        } catch (error) {
+          console.error(`Persisting refreshed Google tokens for Profile ${profileId} failed:`, error);
+        }
+      },
     });
   const realtime = new RealtimeOrchestrator({ config, db: dbContext.db, clock, locks, createSyncProviders });
   const app = new Hono<{ Variables: AppVariables }>();
+
+  // Apply baseline HTTP security headers to every response (UI, API, redirects, errors)
+  app.use('*', async (c, next) => {
+    for (const [name, value] of SECURITY_HEADERS) {
+      c.header(name, value);
+    }
+    await next();
+  });
 
   // Access-decision middleware enforces public vs self-authenticated vs session-protected routes
   app.use('*', async (c, next) => {

@@ -1,14 +1,15 @@
 {
   "name": "cloud-sync",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "scripts": {
     "dev:server": "tsx watch --env-file-if-exists=.env src/server/index.ts",
     "dev:client": "vite",
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
-    "build": "npm run build:client && npm run build:server",
+    "build": "npm run clean && npm run build:client && npm run build:server",
     "start": "node --env-file-if-exists=.env dist/server/index.js",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",

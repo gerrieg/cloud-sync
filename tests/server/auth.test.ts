@@ -67,6 +67,26 @@ describe('Single-Admin 2FA Auth & Session HTTP Seam', () => {
 
       expect(loginRes.status).toBe(200);
     });
+
+    it('locks password-only login for 15 minutes after 5 wrong passwords and resets on success', async () => {
+      ctx = createTestContext({ envOverrides: noTotp });
+
+      for (let i = 0; i < 4; i += 1) {
+        const res = await postLogin(ctx, { username: TEST_USERNAME, password: 'wrong' });
+        expect(res.status).toBe(401);
+      }
+
+      const fifth = await postLogin(ctx, { username: TEST_USERNAME, password: 'wrong' });
+      expect(fifth.status).toBe(429);
+      expect(fifth.headers.get('retry-after')).toBe('900');
+
+      const blocked = await postLogin(ctx, { username: TEST_USERNAME, password: TEST_PASSWORD });
+      expect(blocked.status).toBe(429);
+
+      ctx.clock.advanceMinutes(15);
+      const ok = await postLogin(ctx, { username: TEST_USERNAME, password: TEST_PASSWORD });
+      expect(ok.status).toBe(200);
+    });
   });
 
   describe('GET /api/auth/config', () => {
@@ -131,17 +151,58 @@ describe('Single-Admin 2FA Auth & Session HTTP Seam', () => {
     expect(afterLogoutMe.status).toBe(401);
   });
 
-  it('sets Secure cookie attribute in production', async () => {
+  it('sets Secure cookie attribute when served over HTTPS, but not over plain LAN HTTP in production', async () => {
+    // Plain HTTP in production (e.g. Docker on a LAN IP) must not set Secure, or browsers drop the cookie
     ctx = createTestContext({ envOverrides: { NODE_ENV: 'production' } });
-
-    const loginRes = await postLogin(ctx, {
+    const httpLogin = await postLogin(ctx, {
       username: TEST_USERNAME,
       password: TEST_PASSWORD,
       totpCode: ctx.generateTotp(0),
     });
+    expect(httpLogin.status).toBe(200);
+    expect(httpLogin.headers.get('set-cookie')).not.toContain('Secure');
 
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.headers.get('set-cookie')).toContain('Secure');
+    // Behind a TLS-terminating reverse proxy sending X-Forwarded-Proto: https
+    ctx.clock.advanceSeconds(30);
+    const forwardedHttps = await ctx.app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' },
+      body: JSON.stringify({
+        username: TEST_USERNAME,
+        password: TEST_PASSWORD,
+        totpCode: ctx.generateTotp(0),
+      }),
+    });
+    expect(forwardedHttps.status).toBe(200);
+    expect(forwardedHttps.headers.get('set-cookie')).toContain('Secure');
+    ctx.close();
+
+    // With PUBLIC_BASE_URL=https://...
+    ctx = createTestContext({
+      envOverrides: { NODE_ENV: 'production', PUBLIC_BASE_URL: 'https://sync.example.com' },
+    });
+    const publicHttps = await postLogin(ctx, {
+      username: TEST_USERNAME,
+      password: TEST_PASSWORD,
+      totpCode: ctx.generateTotp(0),
+    });
+    expect(publicHttps.status).toBe(200);
+    expect(publicHttps.headers.get('set-cookie')).toContain('Secure');
+  });
+
+  it('sets baseline HTTP security headers on API, redirect, and error responses', async () => {
+    ctx = createTestContext();
+
+    for (const response of [
+      await ctx.app.request('/api/health'),
+      await ctx.app.request('/'),
+      await ctx.app.request('/api/auth/me'),
+    ]) {
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(response.headers.get('x-frame-options')).toBe('DENY');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(response.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    }
   });
 
   it('keeps the session valid for 30 days and rejects it once expired or tampered', async () => {
@@ -271,7 +332,7 @@ describe('Single-Admin 2FA Auth & Session HTTP Seam', () => {
     expect(nextStep.status).toBe(200);
   });
 
-  it('locks login for 15 minutes after 5 failed TOTP attempts without revealing lockout on wrong password', async () => {
+  it('locks login for 15 minutes after 5 failed attempts without a password oracle', async () => {
     ctx = createTestContext();
 
     // Attempts 1–4 fail with 401
@@ -305,16 +366,15 @@ describe('Single-Admin 2FA Auth & Session HTTP Seam', () => {
     });
     expect(lockedWithValidCode.status).toBe(429);
 
-    // During lockout: WRONG password returns 401 and does NOT reveal lockout
+    // During lockout: wrong password ALSO returns 429 (no password oracle) and skips bcrypt
+    const compareSpy = vi.spyOn(bcrypt, 'compare');
     const wrongPasswordDuringLockout = await postLogin(ctx, {
       username: TEST_USERNAME,
       password: 'wrong-password',
       totpCode: ctx.generateTotp(0),
     });
-    expect(wrongPasswordDuringLockout.status).toBe(401);
-    const wrongPwBody = (await wrongPasswordDuringLockout.json()) as Record<string, unknown>;
-    expect(wrongPwBody.lockedUntil).toBeUndefined();
-    expect(wrongPwBody.retryAfterSeconds).toBeUndefined();
+    expect(wrongPasswordDuringLockout.status).toBe(429);
+    expect(compareSpy).not.toHaveBeenCalled();
 
     // Just before 15 minutes expire (14m59s): still locked
     ctx.clock.advanceSeconds(10 * 60 - 1);

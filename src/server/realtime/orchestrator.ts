@@ -36,7 +36,7 @@ const IDLE_BACKOFF_BASE_MS = 1_000;
 const IDLE_BACKOFF_MAX_MS = 300_000;
 /** A connection that stayed up this long counts as healthy: the next drop starts the backoff over. */
 const IDLE_STABLE_AFTER_MS = 60_000;
-const TICK_INTERVAL_MS = 1_000;
+const TICK_INTERVAL_MS = 5_000;
 const LOG_PRUNE_INTERVAL_MS = 24 * 60 * 60_000;
 /** Apple's calendar tags are cheap to read, so changes show up quickly. */
 const CTAG_POLL_INTERVAL_MS = 30_000;
@@ -102,7 +102,7 @@ export class RealtimeOrchestrator {
     this.runner = new ProfileRunner(deps);
   }
 
-  /** Starts ticking once per second. */
+  /** Starts ticking every few seconds. */
   start(): void {
     this.timer ??= setInterval(() => {
       this.tick().catch((error: unknown) => console.error('Real-time tick failed:', error));
@@ -489,6 +489,10 @@ export class RealtimeOrchestrator {
       return;
     }
     const now = this.deps.clock.now();
+    // Avoid querying watch_channels on every tick when even the shortest polling interval has not elapsed
+    if (runtime.lastGooglePollAt !== null && now - runtime.lastGooglePollAt < GOOGLE_POLL_INTERVAL_MS) {
+      return;
+    }
     const healthy = this.healthyChannelCalendars(profile);
     const interval = watched.every((id) => healthy.has(id)) ? GOOGLE_SAFETY_POLL_INTERVAL_MS : GOOGLE_POLL_INTERVAL_MS;
     if (runtime.lastGooglePollAt !== null && now - runtime.lastGooglePollAt < interval) {

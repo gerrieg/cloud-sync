@@ -122,8 +122,15 @@ export function createRealGoogleContacts(
   limit: <T>(call: () => Promise<T>) => Promise<T>,
   /** Stands in for the Google client, for tests. */
   makeClient?: () => people_v1.People,
+  onTokensRefreshed?: (tokens: GoogleTokens) => void,
 ): GoogleContacts {
-  const client = createGoogleClient(config, tokens, (auth) => google.people({ version: 'v1', auth }), makeClient);
+  const client = createGoogleClient(
+    config,
+    tokens,
+    (auth) => google.people({ version: 'v1', auth }),
+    makeClient,
+    onTokensRefreshed,
+  );
 
   async function guarded<T>(call: (people: people_v1.People) => Promise<T>, resourceName?: string): Promise<T> {
     try {

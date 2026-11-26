@@ -110,9 +110,16 @@ export function createRealGoogleCalendars(
   limit: <T>(call: () => Promise<T>) => Promise<T>,
   /** Stands in for the Google client, for tests. */
   makeClient?: () => calendar_v3.Calendar,
+  onTokensRefreshed?: (tokens: GoogleTokens) => void,
 ): GoogleCalendars {
   const guard = <T>(call: () => Promise<T>, eventId?: string) => guarded(limit, call, eventId);
-  const client = createGoogleClient(config, tokens, (auth) => google.calendar({ version: 'v3', auth }), makeClient);
+  const client = createGoogleClient(
+    config,
+    tokens,
+    (auth) => google.calendar({ version: 'v3', auth }),
+    makeClient,
+    onTokensRefreshed,
+  );
 
   /** Occurrences of a series are separate Google events: find the one to override. */
   async function findInstance(calendarId: string, draft: GoogleEventDraft): Promise<string> {

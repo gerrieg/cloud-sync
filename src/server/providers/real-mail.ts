@@ -255,8 +255,15 @@ export function createRealGoogleMail(
   limitImports: <T>(call: () => Promise<T>) => Promise<T>,
   /** Stands in for the Google client, for tests. */
   makeClient?: () => gmail_v1.Gmail,
+  onTokensRefreshed?: (tokens: GoogleTokens) => void,
 ): GoogleMail {
-  const client = createGoogleClient(config, tokens, (auth) => google.gmail({ version: 'v1', auth }), makeClient);
+  const client = createGoogleClient(
+    config,
+    tokens,
+    (auth) => google.gmail({ version: 'v1', auth }),
+    makeClient,
+    onTokensRefreshed,
+  );
 
   async function guarded<T>(call: (gmail: gmail_v1.Gmail) => Promise<T>, messageId?: string): Promise<T> {
     try {

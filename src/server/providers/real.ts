@@ -18,6 +18,7 @@ import {
   GOOGLE_INVALID_GRANT,
   GoogleAuthError,
   type AppleCredentials,
+  type GoogleTokens,
   type SyncProviders,
   type SyncProvidersFactory,
 } from './types.js';
@@ -35,6 +36,8 @@ const GOOGLE_SCOPES = [
 export interface RealProvidersConfig {
   readonly googleClientId: string;
   readonly googleClientSecret: string;
+  /** Called whenever a Google OAuth2 client refreshes tokens for a Profile so they can be persisted. */
+  readonly onGoogleTokensRefreshed?: (profileId: string, tokens: GoogleTokens) => void;
 }
 
 function describeError(error: unknown): string {
@@ -135,61 +138,102 @@ export function createRealSyncProviders(config: RealProvidersConfig): SyncProvid
   };
   const peopleLimiterFor = limiterPool(PEOPLE_API_MIN_INTERVAL_MS);
   const gmailImportLimiterFor = limiterPool(GMAIL_IMPORT_MIN_INTERVAL_MS);
+  // One Apple mail adapter per Profile (invalidated when credentials change), so `pollMail` and
+  // the `syncNow` it triggers share the same serialized IMAP connection instead of opening two.
+  const appleMailPool = new Map<string, { readonly key: string; readonly mail: SyncProviders['apple']['mail'] }>();
+  const appleMailFor = (profileId: string, credentials: AppleCredentials | null): SyncProviders['apple']['mail'] => {
+    if (!credentials) {
+      appleMailPool.delete(profileId);
+      return createRealAppleMail(null);
+    }
+    const key = `${credentials.appleId}\0${credentials.appPassword}`;
+    const cached = appleMailPool.get(profileId);
+    if (cached && cached.key === key) {
+      return cached.mail;
+    }
+    const mail = createRealAppleMail(credentials);
+    appleMailPool.set(profileId, { key, mail });
+    return mail;
+  };
 
-  return (context): SyncProviders => ({
-    apple: {
-      async testConnection(): Promise<AppleConnectionReport> {
-        const credentials = context.apple;
-        if (!credentials) {
-          const missing: ProtocolCheckResult = { ok: false, error: 'No Apple credentials configured' };
-          return { caldav: missing, carddav: missing, imap: missing };
-        }
-        const [caldav, carddav, imap] = await Promise.all([
-          runCheck((signal) => checkDav(ICLOUD_CALDAV_URL, 'caldav', credentials, signal)),
-          runCheck((signal) => checkDav(ICLOUD_CARDDAV_URL, 'carddav', credentials, signal)),
-          runCheck((signal) => checkImap(credentials, signal)),
-        ]);
-        return { caldav, carddav, imap };
-      },
-      calendars: createRealAppleCalendars(context.apple),
-      contacts: createRealAppleContacts(context.apple),
-      mail: createRealAppleMail(context.apple),
-    },
-    google: {
-      calendars: createRealGoogleCalendars(config, context.googleTokens, calendarThrottleFor(context.profileId)),
-      contacts: createRealGoogleContacts(config, context.googleTokens, peopleLimiterFor(context.profileId)),
-      mail: createRealGoogleMail(config, context.googleTokens, gmailImportLimiterFor(context.profileId)),
-      buildAuthUrl({ redirectUri, state }) {
-        return createOAuthClient(config, redirectUri).generateAuthUrl({
-          access_type: 'offline',
-          prompt: 'consent',
-          include_granted_scopes: true,
-          scope: [...GOOGLE_SCOPES],
-          state,
-        });
-      },
-      async exchangeCode({ code, redirectUri }) {
-        try {
-          const { tokens } = await createOAuthClient(config, redirectUri).getToken(code);
-          if (!tokens.refresh_token) {
-            throw new GoogleAuthError('missing_refresh_token', 'Google returned no refresh token');
+  return (context): SyncProviders => {
+    const onTokensRefreshed = config.onGoogleTokensRefreshed
+      ? (tokens: GoogleTokens) => config.onGoogleTokensRefreshed?.(context.profileId, tokens)
+      : undefined;
+
+    return {
+      apple: {
+        async testConnection(): Promise<AppleConnectionReport> {
+          const credentials = context.apple;
+          if (!credentials) {
+            const missing: ProtocolCheckResult = { ok: false, error: 'No Apple credentials configured' };
+            return { caldav: missing, carddav: missing, imap: missing };
           }
-          return {
-            refresh_token: tokens.refresh_token,
-            access_token: tokens.access_token ?? undefined,
-            expiry_date: tokens.expiry_date ?? undefined,
-            scope: tokens.scope,
-          };
-        } catch (error) {
-          if (error instanceof GoogleAuthError) {
+          const [caldav, carddav, imap] = await Promise.all([
+            runCheck((signal) => checkDav(ICLOUD_CALDAV_URL, 'caldav', credentials, signal)),
+            runCheck((signal) => checkDav(ICLOUD_CARDDAV_URL, 'carddav', credentials, signal)),
+            runCheck((signal) => checkImap(credentials, signal)),
+          ]);
+          return { caldav, carddav, imap };
+        },
+        calendars: createRealAppleCalendars(context.apple),
+        contacts: createRealAppleContacts(context.apple),
+        mail: appleMailFor(context.profileId, context.apple),
+      },
+      google: {
+        calendars: createRealGoogleCalendars(
+          config,
+          context.googleTokens,
+          calendarThrottleFor(context.profileId),
+          undefined,
+          onTokensRefreshed,
+        ),
+        contacts: createRealGoogleContacts(
+          config,
+          context.googleTokens,
+          peopleLimiterFor(context.profileId),
+          undefined,
+          onTokensRefreshed,
+        ),
+        mail: createRealGoogleMail(
+          config,
+          context.googleTokens,
+          gmailImportLimiterFor(context.profileId),
+          undefined,
+          onTokensRefreshed,
+        ),
+        buildAuthUrl({ redirectUri, state }) {
+          return createOAuthClient(config, redirectUri).generateAuthUrl({
+            access_type: 'offline',
+            prompt: 'consent',
+            include_granted_scopes: true,
+            scope: [...GOOGLE_SCOPES],
+            state,
+          });
+        },
+        async exchangeCode({ code, redirectUri }) {
+          try {
+            const { tokens } = await createOAuthClient(config, redirectUri).getToken(code);
+            if (!tokens.refresh_token) {
+              throw new GoogleAuthError('missing_refresh_token', 'Google returned no refresh token');
+            }
+            return {
+              refresh_token: tokens.refresh_token,
+              access_token: tokens.access_token ?? undefined,
+              expiry_date: tokens.expiry_date ?? undefined,
+              scope: tokens.scope,
+            };
+          } catch (error) {
+            if (error instanceof GoogleAuthError) {
+              throw error;
+            }
+            if (isInvalidGrant(error)) {
+              throw new GoogleAuthError(GOOGLE_INVALID_GRANT, describeError(error));
+            }
             throw error;
           }
-          if (isInvalidGrant(error)) {
-            throw new GoogleAuthError(GOOGLE_INVALID_GRANT, describeError(error));
-          }
-          throw error;
-        }
+        },
       },
-    },
-  });
+    };
+  };
 }

@@ -1,13 +1,15 @@
-import type { calendar_v3, gmail_v1, people_v1 } from 'googleapis';
+import type { Auth, calendar_v3, gmail_v1, people_v1 } from 'googleapis';
 import { describe, expect, it, vi } from 'vitest';
 import { GoogleEventNotFoundError, GoogleSyncTokenExpiredError, type GoogleEventDraft } from '../../src/server/providers/calendar-types.js';
+import { createGoogleClient } from '../../src/server/providers/client-helpers.js';
 import { GoogleContactNotFoundError } from '../../src/server/providers/contact-types.js';
 import { GoogleMessageNotFoundError } from '../../src/server/providers/mail-types.js';
 import { createGoogleThrottle } from '../../src/server/providers/google-throttle.js';
+import { createRealSyncProviders } from '../../src/server/providers/real.js';
 import { createRealGoogleCalendars } from '../../src/server/providers/real-calendar.js';
 import { createRealGoogleContacts } from '../../src/server/providers/real-contacts.js';
 import { createRealGoogleMail } from '../../src/server/providers/real-mail.js';
-import { GoogleAuthError } from '../../src/server/providers/types.js';
+import { GoogleAuthError, type GoogleTokens } from '../../src/server/providers/types.js';
 
 const config = { googleClientId: 'id', googleClientSecret: 'secret' };
 const tokens = { refresh_token: 'r' };
@@ -472,5 +474,63 @@ describe('the Gmail adapter', () => {
     const mail = adapter({ labels: { list: vi.fn().mockRejectedValue(failure(400, { error: 'invalid_grant' })) } });
 
     await expect(mail.listLabels()).rejects.toBeInstanceOf(GoogleAuthError);
+  });
+});
+
+describe('createGoogleClient token persistence', () => {
+  it('merges refreshed tokens while preserving the existing refresh_token', () => {
+    let capturedAuth: Auth.OAuth2Client | undefined;
+    const saved: GoogleTokens[] = [];
+    const getClient = createGoogleClient(
+      config,
+      { refresh_token: 'refresh-1', access_token: 'old-access', expiry_date: 1000, scope: 's1' },
+      (auth) => {
+        capturedAuth = auth;
+        return auth;
+      },
+      undefined,
+      (updated) => saved.push(updated),
+    );
+
+    getClient();
+    expect(capturedAuth).toBeDefined();
+
+    // Typical refresh response omits refresh_token and scope
+    capturedAuth!.emit('tokens', { access_token: 'new-access', expiry_date: 2000 });
+    expect(saved).toEqual([
+      { refresh_token: 'refresh-1', access_token: 'new-access', expiry_date: 2000, scope: 's1' },
+    ]);
+
+    // Empty token event is ignored
+    capturedAuth!.emit('tokens', {});
+    expect(saved).toHaveLength(1);
+
+    // Rotated refresh_token replaces the previous one
+    capturedAuth!.emit('tokens', { refresh_token: 'refresh-2', access_token: 'access-3', expiry_date: 3000 });
+    expect(saved[1]).toEqual({
+      refresh_token: 'refresh-2',
+      access_token: 'access-3',
+      expiry_date: 3000,
+      scope: 's1',
+    });
+  });
+});
+
+describe('createRealSyncProviders Apple mail pooling', () => {
+  it('reuses the Apple mail adapter for the same Profile and credentials, and invalidates on change', () => {
+    const factory = createRealSyncProviders(config);
+    const credsA = { appleId: 'a@icloud.com', appPassword: 'pw-1' };
+    const credsB = { appleId: 'a@icloud.com', appPassword: 'pw-2' };
+
+    const first = factory({ profileId: 'p1', apple: credsA, googleTokens: null });
+    const second = factory({ profileId: 'p1', apple: { ...credsA }, googleTokens: null });
+    const otherProfile = factory({ profileId: 'p2', apple: credsA, googleTokens: null });
+    const changed = factory({ profileId: 'p1', apple: credsB, googleTokens: null });
+    const disconnected = factory({ profileId: 'p1', apple: null, googleTokens: null });
+
+    expect(second.apple.mail).toBe(first.apple.mail);
+    expect(otherProfile.apple.mail).not.toBe(first.apple.mail);
+    expect(changed.apple.mail).not.toBe(first.apple.mail);
+    expect(disconnected.apple.mail).not.toBe(changed.apple.mail);
   });
 });

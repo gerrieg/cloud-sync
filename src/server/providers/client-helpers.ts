@@ -39,6 +39,7 @@ export function createGoogleClient<T>(
   tokens: GoogleTokens | null,
   build: (auth: Auth.OAuth2Client) => T,
   makeClient?: () => T,
+  onTokensRefreshed?: (tokens: GoogleTokens) => void,
 ): () => T {
   let realClient: T | undefined;
   return () => {
@@ -50,7 +51,22 @@ export function createGoogleClient<T>(
     }
     if (!realClient) {
       const auth = new google.auth.OAuth2(config.googleClientId, config.googleClientSecret);
-      auth.setCredentials({ ...tokens });
+      let current: GoogleTokens = { ...tokens };
+      auth.setCredentials({ ...current });
+      if (onTokensRefreshed) {
+        auth.on('tokens', (refreshed) => {
+          if (!refreshed.access_token && !refreshed.refresh_token) {
+            return;
+          }
+          current = {
+            refresh_token: refreshed.refresh_token ?? current.refresh_token,
+            access_token: refreshed.access_token ?? current.access_token,
+            expiry_date: refreshed.expiry_date ?? current.expiry_date,
+            scope: refreshed.scope ?? current.scope,
+          };
+          onTokensRefreshed(current);
+        });
+      }
       realClient = build(auth);
     }
     return realClient;

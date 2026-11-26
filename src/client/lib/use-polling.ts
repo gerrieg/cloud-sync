@@ -33,7 +33,6 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number, deps: 
       mounted.current = false;
       clearInterval(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, intervalMs, ...deps]);
 
   return { data, error, reload };
